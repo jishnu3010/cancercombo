@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual Environment
+venv/
+.env
+
+# VS Code
+.vscode/
+
+# Python cache
+.pytest_cache/
+.cache/
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Logs
+*.log
+
+# Model checkpoints
+checkpoints/
+weights/
+*.pt
+*.pth
+
+# Dataset
+data/
+
+# OS files
+.DS_Store
+Thumbs.db
