@@ -61,13 +61,19 @@ def main():
         default="checkpoints/cancercombo_best.ckpt",
         help="Path to model checkpoint (.ckpt or .pt)"
     )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config.yaml",
+        help="Path to YAML configuration file"
+    )
     
     args = parser.parse_args()
     
     if args.mode == "train":
-        run_training("config.yaml")
+        run_training(args.config)
     elif args.mode == "evaluate":
-        run_evaluation(args.checkpoint, "config.yaml")
+        run_evaluation(args.checkpoint, args.config)
     elif args.mode == "predict":
         run_prediction_cli(args.checkpoint)
     else:

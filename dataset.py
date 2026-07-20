@@ -102,20 +102,24 @@ def load_synergy_dataset(zip_or_csv_path: str = "data/DrugCombination_with_SMILE
         else:
             df = pd.read_csv(zip_or_csv_path)
             
+        records = df.to_dict('records')
         data_list = []
-        for _, row in df.iterrows():
+        default_d_a = [0.0, 0.1, 1.0, 10.0]
+        default_d_b = [0.0, 0.2, 2.0, 20.0]
+        
+        for row in records:
             s_a = row.get('smiles_a', row.get('smiles1', row.get('SMILES_A', '')))
             s_b = row.get('smiles_b', row.get('smiles2', row.get('SMILES_B', '')))
             cell = row.get('cell_line_name', row.get('cell', row.get('CELL_NAME', 'MCF7')))
             
-            d_a = row.get('doses_a', [0.0, 0.1, 1.0, 10.0])
-            d_b = row.get('doses_b', [0.0, 0.2, 2.0, 20.0])
+            d_a = row.get('doses_a', default_d_a)
+            d_b = row.get('doses_b', default_d_b)
             if isinstance(d_a, str):
                 try: d_a = json.loads(d_a)
-                except Exception: d_a = [0.0, 0.1, 1.0, 10.0]
+                except Exception: d_a = default_d_a
             if isinstance(d_b, str):
                 try: d_b = json.loads(d_b)
-                except Exception: d_b = [0.0, 0.2, 2.0, 20.0]
+                except Exception: d_b = default_d_b
                 
             viab = row.get('viability_matrix', None)
             if isinstance(viab, str):
