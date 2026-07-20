@@ -29,13 +29,13 @@ def run_training(config_path: str = "config.yaml"):
     
     logger.info("Attempting to load real dataset archives...")
     real_gex = load_nci60_gex("data/features/NCI-60_landmark_gex.csv", target_dim=m_config.cell_in_dim)
-    train_real = load_synergy_dataset("data/DrugCombination_with_SMILES.zip", split='train')
-    val_real = load_synergy_dataset("data/DrugCombination_with_SMILES.zip", split='val')
+    real_data = load_synergy_dataset("data/DrugCombination_with_SMILES.zip")
     
-    if train_real and len(train_real) >= 5:
-        logger.info(f"Loaded real dataset: {len(train_real)} train samples, {len(val_real)} val samples.")
-        train_data = train_real
-        val_data = val_real
+    if real_data and len(real_data) >= 10:
+        logger.info(f"Loaded {len(real_data)} real drug combination samples from archive.")
+        split_idx = int(len(real_data) * 0.8)
+        train_data = real_data[:split_idx]
+        val_data = real_data[split_idx:]
         cell_features = real_gex
     else:
         logger.info("Real dataset archive not found or incomplete. Generating synthetic datasets for simulation...")

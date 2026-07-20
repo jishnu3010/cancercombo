@@ -80,18 +80,14 @@ def load_nci60_gex(csv_path: str = "data/features/NCI-60_landmark_gex.csv", targ
         return {}
 
 
-def load_synergy_dataset(
-    zip_or_csv_path: str = "data/DrugCombination_with_SMILES.zip",
-    split: Optional[str] = None
-) -> List[Dict[str, Any]]:
-    """Load drug combination dataset from ZIP or CSV archive with optional split filtering.
+def load_synergy_dataset(zip_or_csv_path: str = "data/DrugCombination_with_SMILES.zip") -> List[Dict[str, Any]]:
+    """Load drug combination dataset from ZIP or CSV archive.
 
     Args:
         zip_or_csv_path: Path to dataset ZIP archive or CSV file.
-        split: Optional split filter ('train', 'val', or 'test').
 
     Returns:
-        List[Dict[str, Any]]: Parsed list of sample dictionaries for the requested split.
+        List[Dict[str, Any]]: Parsed list of sample dictionaries.
     """
     if not os.path.exists(zip_or_csv_path):
         return []
@@ -105,25 +101,6 @@ def load_synergy_dataset(
                     df = pd.read_csv(f)
         else:
             df = pd.read_csv(zip_or_csv_path)
-            
-        # Handle train/val/test splitting
-        if split is not None and len(df) > 0:
-            split_clean = str(split).lower().strip()
-            if 'split' in df.columns:
-                # Filter based on existing split column (1: train, 2: val, 3: test)
-                split_val = 1 if split_clean == 'train' else (2 if split_clean == 'val' else 3)
-                df = df[df['split'] == split_val]
-            else:
-                # Dynamic 70% Train / 15% Val / 15% Test split
-                n = len(df)
-                train_end = int(n * 0.70)
-                val_end = int(n * 0.85)
-                if split_clean == 'train':
-                    df = df.iloc[:train_end]
-                elif split_clean == 'val':
-                    df = df.iloc[train_end:val_end]
-                elif split_clean == 'test':
-                    df = df.iloc[val_end:]
             
         data_list = []
         for _, row in df.iterrows():
