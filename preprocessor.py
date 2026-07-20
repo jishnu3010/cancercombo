@@ -71,7 +71,9 @@ class MolecularPreprocessor:
                 val = func(mol)
                 if np.isnan(val) or np.isinf(val):
                     val = 0.0
-                desc_vec.append(float(val))
+                else:
+                    val = float(np.clip(val, -1e6, 1e6))
+                desc_vec.append(val)
             except Exception:
                 desc_vec.append(0.0)
                 
