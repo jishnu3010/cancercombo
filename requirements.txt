@@ -1,21 +1,26 @@
-# Core Deep Learning Framework
+# Core Deep Learning & PyTorch Framework
 torch>=2.0.0
 pytorch-lightning>=2.0.0
 torchmetrics>=0.11.0
 
-# Transformer & Molecular Encoders
+# Transformer Models & Pretrained Encoders
 transformers>=4.30.0
 
-# Computational Chemistry & Bio-Informatics
+# Cheminformatics & Computational Chemistry
 rdkit>=2022.9.1
 
-# Scientific Data Processing & Mathematics
+# Scientific Computing & Data Processing
 numpy>=1.23.0
 pandas>=1.5.0
 scipy>=1.10.0
 scikit-learn>=1.2.0
+h5py>=3.8.0
+joblib>=1.2.0
 
-# Utilities, Configs & Testing
+# Experiment Tracking & Logging
+wandb>=0.15.0
+
+# Configuration, Utilities & Testing
 pyyaml>=6.0
 tqdm>=4.65.0
 pytest>=7.0.0
