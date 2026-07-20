@@ -17,13 +17,13 @@ def test_hill_solver_shapes():
     e1 = torch.tensor([[80.0], [50.0], [90.0], [20.0]])
     e2 = torch.tensor([[70.0], [40.0], [80.0], [30.0]])
     e3 = torch.tensor([[10.0], [5.0], [15.0], [2.0]])
-    c1 = torch.tensor([[1.0], [0.5], [2.0], [1.5]])
-    c2 = torch.tensor([[2.0], [1.0], [3.0], [2.5]])
+    log_c1 = torch.tensor([[0.0], [-0.69], [0.69], [0.40]])
+    log_c2 = torch.tensor([[0.69], [0.0], [1.09], [0.91]])
     h1 = torch.tensor([[1.2], [0.8], [1.5], [1.0]])
     h2 = torch.tensor([[1.5], [1.0], [2.0], [1.2]])
     alpha = torch.tensor([[1.0], [2.0], [0.5], [1.5]])
     
-    out = solver(doses_a, doses_b, e1, e2, e3, c1, c2, h1, h2, alpha)
+    out = solver(doses_a, doses_b, e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
     assert out.shape == (batch_size, M, N)
     
 def test_hill_solver_zero_dose_gradients():
@@ -36,13 +36,13 @@ def test_hill_solver_zero_dose_gradients():
     e1 = torch.tensor([[80.0], [50.0]], requires_grad=True)
     e2 = torch.tensor([[70.0], [40.0]], requires_grad=True)
     e3 = torch.tensor([[10.0], [5.0]], requires_grad=True)
-    c1 = torch.tensor([[1.0], [0.5]], requires_grad=True)
-    c2 = torch.tensor([[2.0], [1.0]], requires_grad=True)
+    log_c1 = torch.tensor([[0.0], [-0.69]], requires_grad=True)
+    log_c2 = torch.tensor([[0.69], [0.0]], requires_grad=True)
     h1 = torch.tensor([[1.2], [0.8]], requires_grad=True)
     h2 = torch.tensor([[1.5], [1.0]], requires_grad=True)
     alpha = torch.tensor([[1.0], [2.0]], requires_grad=True)
     
-    out = solver(doses_a, doses_b, e1, e2, e3, c1, c2, h1, h2, alpha)
+    out = solver(doses_a, doses_b, e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
     
     assert out.shape == (2, 4, 5)
     assert torch.allclose(out, torch.tensor(100.0))
@@ -50,7 +50,7 @@ def test_hill_solver_zero_dose_gradients():
     loss = out.sum()
     loss.backward()
     
-    for p in [e1, e2, e3, c1, c2, h1, h2, alpha]:
+    for p in [e1, e2, e3, log_c1, log_c2, h1, h2, alpha]:
         assert p.grad is not None
         assert not torch.isnan(p.grad).any()
         assert not torch.isinf(p.grad).any()
@@ -68,13 +68,13 @@ def test_hill_solver_extreme_doses():
     e1 = torch.tensor([[80.0], [50.0]], requires_grad=True)
     e2 = torch.tensor([[70.0], [40.0]], requires_grad=True)
     e3 = torch.tensor([[10.0], [5.0]], requires_grad=True)
-    c1 = torch.tensor([[1e-4], [1e-2]], requires_grad=True)
-    c2 = torch.tensor([[1e-4], [1e-2]], requires_grad=True)
+    log_c1 = torch.tensor([[-9.2], [-4.6]], requires_grad=True)
+    log_c2 = torch.tensor([[-9.2], [-4.6]], requires_grad=True)
     h1 = torch.tensor([[8.0], [10.0]], requires_grad=True)
     h2 = torch.tensor([[8.0], [10.0]], requires_grad=True)
     alpha = torch.tensor([[50.0], [100.0]], requires_grad=True)
     
-    out = solver(doses_a, doses_b, e1, e2, e3, c1, c2, h1, h2, alpha)
+    out = solver(doses_a, doses_b, e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
     
     assert not torch.isnan(out).any(), "Output contains NaNs under extreme doses!"
     assert not torch.isinf(out).any(), "Output contains Infs under extreme doses!"
@@ -82,7 +82,7 @@ def test_hill_solver_extreme_doses():
     loss = out.sum()
     loss.backward()
     
-    for name, p in [("e1", e1), ("e2", e2), ("e3", e3), ("c1", c1), ("c2", c2), ("h1", h1), ("h2", h2), ("alpha", alpha)]:
+    for name, p in [("e1", e1), ("e2", e2), ("e3", e3), ("log_c1", log_c1), ("log_c2", log_c2), ("h1", h1), ("h2", h2), ("alpha", alpha)]:
         assert p.grad is not None, f"Gradient for {name} is None!"
         assert not torch.isnan(p.grad).any(), f"Gradient for {name} contains NaN!"
         assert not torch.isinf(p.grad).any(), f"Gradient for {name} contains Inf!"
@@ -93,5 +93,6 @@ if __name__ == "__main__":
     test_hill_solver_zero_dose_gradients()
     test_hill_solver_extreme_doses()
     print("ALL HILL SOLVER TESTS PASSED SUCCESSFULLY!")
+
 
 

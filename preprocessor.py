@@ -2,14 +2,17 @@ import numpy as np
 from rdkit import Chem
 from rdkit.Chem import Descriptors, rdMolDescriptors
 from typing import Tuple, Optional
+from functools import lru_cache
 
 class MolecularPreprocessor:
-    """RDKit chemistry preprocessor mapping SMILES strings to numerical representations."""
+    """RDKit chemistry preprocessor mapping SMILES strings to numerical representations with LRU caching."""
     
-    def __init__(self, morgan_nbits: int = 2048, morgan_radius: int = 2):
+    def __init__(self, morgan_nbits: int = 2048, morgan_radius: int = 2, cache_size: int = 10000):
         self.morgan_nbits = morgan_nbits
         self.morgan_radius = morgan_radius
         self.descriptor_names = [desc[0] for desc in Descriptors._descList][:200]
+        self.cache_size = cache_size
+        self._cache = {}
         
     def smiles_to_mol(self, smiles: str) -> Optional[Chem.Mol]:
         """Convert SMILES to RDKit Mol object.
@@ -82,7 +85,7 @@ class MolecularPreprocessor:
         return res
 
     def process_smiles(self, smiles: str) -> Tuple[np.ndarray, np.ndarray, bool]:
-        """Runs the complete chemical processing pipeline on a SMILES string.
+        """Runs the complete chemical processing pipeline on a SMILES string with LRU caching.
 
         Args:
             smiles: Raw SMILES string.
@@ -90,14 +93,24 @@ class MolecularPreprocessor:
         Returns:
             Tuple[np.ndarray, np.ndarray, bool]: Morgan vector, descriptor vector, success flag.
         """
+        if smiles in self._cache:
+            m_fp, desc, ok = self._cache[smiles]
+            return m_fp.copy(), desc.copy(), ok
+
         mol = self.smiles_to_mol(smiles)
         if mol is None:
-            return (
+            res = (
                 np.zeros(self.morgan_nbits, dtype=np.float32),
                 np.zeros(200, dtype=np.float32),
                 False
             )
-        
-        morgan_fp = self.get_morgan_fingerprint(mol)
-        descriptors = self.get_physical_descriptors(mol)
-        return morgan_fp, descriptors, True
+        else:
+            morgan_fp = self.get_morgan_fingerprint(mol)
+            descriptors = self.get_physical_descriptors(mol)
+            res = (morgan_fp, descriptors, True)
+            
+        if len(self._cache) < self.cache_size:
+            self._cache[smiles] = res
+            
+        return res[0].copy(), res[1].copy(), res[2]
+

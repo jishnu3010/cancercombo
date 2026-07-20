@@ -15,8 +15,8 @@ class BivariateHillSolver(nn.Module):
         e1: torch.Tensor,
         e2: torch.Tensor,
         e3: torch.Tensor,
-        c1: torch.Tensor,
-        c2: torch.Tensor,
+        log_c1: torch.Tensor,
+        log_c2: torch.Tensor,
         h1: torch.Tensor,
         h2: torch.Tensor,
         alpha: torch.Tensor
@@ -26,7 +26,9 @@ class BivariateHillSolver(nn.Module):
         Args:
             doses_a: Dose range for Drug A (B, M) or (B, M, N).
             doses_b: Dose range for Drug B (B, N) or (B, M, N).
-            e1, e2, e3, c1, c2, h1, h2, alpha: Parameter tensors (B, 1).
+            e1, e2, e3: Efficacy parameter tensors (B, 1).
+            log_c1, log_c2: Log-concentration parameter tensors (B, 1).
+            h1, h2, alpha: Slope and interaction parameter tensors (B, 1).
 
         Returns:
             torch.Tensor: Predicted cell viability matrix of shape (B, M, N).
@@ -34,8 +36,8 @@ class BivariateHillSolver(nn.Module):
         e1_u = e1.unsqueeze(-1)
         e2_u = e2.unsqueeze(-1)
         e3_u = e3.unsqueeze(-1)
-        c1_u = c1.unsqueeze(-1)
-        c2_u = c2.unsqueeze(-1)
+        log_c1_u = log_c1.unsqueeze(-1)
+        log_c2_u = log_c2.unsqueeze(-1)
         h1_u = h1.unsqueeze(-1)
         h2_u = h2.unsqueeze(-1)
         alpha_u = alpha.unsqueeze(-1)
@@ -55,17 +57,16 @@ class BivariateHillSolver(nn.Module):
         mask_b = doses_b_grid > 0.0
         mask_ab = mask_a & mask_b
 
-        # Protect dose and concentration values before log() to prevent log(0), -inf, or NaN
+        # Protect dose values before log() to prevent log(0), -inf, or NaN
         doses_a_safe = torch.where(mask_a, doses_a_grid, torch.ones_like(doses_a_grid))
         doses_b_safe = torch.where(mask_b, doses_b_grid, torch.ones_like(doses_b_grid))
 
-        c1_safe = torch.clamp(c1_u, min=1e-15)
-        c2_safe = torch.clamp(c2_u, min=1e-15)
-
         log_x1 = torch.log(doses_a_safe)
         log_x2 = torch.log(doses_b_safe)
-        log_c1 = torch.log(c1_safe)
-        log_c2 = torch.log(c2_safe)
+
+        # Log-space concentration parameterization avoids taking log() of C in forward pass
+        log_c1 = torch.clamp(log_c1_u, min=-30.0, max=30.0)
+        log_c2 = torch.clamp(log_c2_u, min=-30.0, max=30.0)
 
         # Log-space exponent calculations prior to exponentiation
         exp_term_A = log_c1 * h1_u + log_c2 * h2_u

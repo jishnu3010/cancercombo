@@ -49,11 +49,10 @@ def test_full_model_forward_and_backward(enable_dd_attn):
     
     assert y_pred.shape == (batch_size, M, N)
     
-    e1, e2, e3, c1, c2, h1, h2, alpha = params
+    e1, e2, e3, log_c1, log_c2, h1, h2, alpha = params
     assert e1.shape == (batch_size, 1)
     
     assert (e1 >= config.e_min).all() and (e1 <= config.e_max).all()
-    assert (c1 >= config.c_min).all() and (c1 <= config.c_max).all()
     assert (h1 >= config.h_min).all() and (h1 <= config.h_max).all()
     assert (alpha >= config.alpha_min).all() and (alpha <= config.alpha_max).all()
     

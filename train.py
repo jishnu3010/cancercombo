@@ -10,7 +10,7 @@ except ImportError:
         def __init__(self, *args, **kwargs): pass
 
 from config import load_config
-from dataset import DrugComboDataset
+from dataset import DrugComboDataset, load_nci60_gex, load_synergy_dataset
 from trainer import CancerComboLightningModule
 from helpers import set_seed, generate_mock_data
 from logger import setup_logger
@@ -27,15 +27,38 @@ def run_training(config_path: str = "config.yaml"):
     m_config, t_config = load_config(config_path)
     set_seed(t_config.seed)
     
-    logger.info("Generating mock datasets...")
-    train_data, cell_features = generate_mock_data(64)
-    val_data, _ = generate_mock_data(16)
+    logger.info("Attempting to load real dataset archives...")
+    real_gex = load_nci60_gex("data/features/NCI-60_landmark_gex.csv", target_dim=m_config.cell_in_dim)
+    real_data = load_synergy_dataset("data/DrugCombination_with_SMILES.zip")
+    
+    if real_data and len(real_data) >= 10:
+        logger.info(f"Loaded {len(real_data)} real drug combination samples from archive.")
+        split_idx = int(len(real_data) * 0.8)
+        train_data = real_data[:split_idx]
+        val_data = real_data[split_idx:]
+        cell_features = real_gex
+    else:
+        logger.info("Real dataset archive not found or incomplete. Generating synthetic datasets for simulation...")
+        train_data, cell_features = generate_mock_data(64)
+        val_data, _ = generate_mock_data(16)
     
     train_dataset = DrugComboDataset(train_data, cell_features)
     val_dataset = DrugComboDataset(val_data, cell_features)
     
-    train_loader = DataLoader(train_dataset, batch_size=t_config.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=t_config.batch_size, shuffle=False)
+    num_workers = getattr(t_config, "num_workers", 0)
+    pin_mem = torch.cuda.is_available()
+    
+    loader_kwargs = {
+        "batch_size": t_config.batch_size,
+        "pin_memory": pin_mem,
+        "num_workers": num_workers
+    }
+    if num_workers > 0 and os.name != 'nt':
+        loader_kwargs["persistent_workers"] = True
+        loader_kwargs["prefetch_factor"] = 2
+        
+    train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
+    val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
     
     logger.info("Initializing LightningModule...")
     model = CancerComboLightningModule(m_config, t_config)

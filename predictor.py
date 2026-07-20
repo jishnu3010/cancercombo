@@ -75,7 +75,7 @@ class SynergyPredictor:
                 t_cell, t_doses_a, t_doses_b
             )
             
-        e1, e2, e3, c1, c2, h1, h2, alpha = params
+        e1, e2, e3, log_c1, log_c2, h1, h2, alpha = params
         
         return {
             "predicted_viability_matrix": y_pred.squeeze(0).cpu().numpy(),
@@ -83,8 +83,10 @@ class SynergyPredictor:
                 "e1": float(e1.item()),
                 "e2": float(e2.item()),
                 "e3": float(e3.item()),
-                "c1": float(c1.item()),
-                "c2": float(c2.item()),
+                "log_c1": float(log_c1.item()),
+                "log_c2": float(log_c2.item()),
+                "c1": float(torch.exp(log_c1).item()),
+                "c2": float(torch.exp(log_c2).item()),
                 "h1": float(h1.item()),
                 "h2": float(h2.item()),
                 "alpha": float(alpha.item())

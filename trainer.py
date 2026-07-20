@@ -46,18 +46,22 @@ class CancerComboLightningModule(pl.LightningModule):
         )
         
     def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        y_pred, _ = self(batch)
+        y_pred, params_pred = self(batch)
         y_true = batch["viability"]
         
-        loss = self.loss_fn(y_pred, y_true)
+        # Extract ground-truth parameter dict if available for auxiliary supervision
+        params_true = {p: batch[p] for p in ["e1", "e2", "e3", "log_c1", "log_c2", "h1", "h2", "alpha"] if p in batch}
+        
+        loss = self.loss_fn(y_pred, y_true, params_pred=params_pred, params_true=params_true if params_true else None)
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
         return loss
         
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        y_pred, _ = self(batch)
+        y_pred, params_pred = self(batch)
         y_true = batch["viability"]
         
-        loss = self.loss_fn(y_pred, y_true)
+        params_true = {p: batch[p] for p in ["e1", "e2", "e3", "log_c1", "log_c2", "h1", "h2", "alpha"] if p in batch}
+        loss = self.loss_fn(y_pred, y_true, params_pred=params_pred, params_true=params_true if params_true else None)
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
         
         self.validation_step_outputs.append({
@@ -75,8 +79,13 @@ class CancerComboLightningModule(pl.LightningModule):
         
         metrics = calculate_metrics(preds, trues)
         self.log("val_rmse", metrics["rmse"], prog_bar=True, sync_dist=True)
+        self.log("val_mae", metrics["mae"], prog_bar=False, sync_dist=True)
+        self.log("val_r2", metrics["r2"], prog_bar=False, sync_dist=True)
         self.log("val_pearson", metrics["pearson"], prog_bar=True, sync_dist=True)
         self.log("val_spearman", metrics["spearman"], prog_bar=True, sync_dist=True)
+        self.log("val_top_k_precision", metrics["top_k_precision"], prog_bar=False, sync_dist=True)
+        self.log("val_top_k_recall", metrics["top_k_recall"], prog_bar=False, sync_dist=True)
+        self.log("val_top_k_hit_rate", metrics["top_k_hit_rate"], prog_bar=False, sync_dist=True)
         
         self.validation_step_outputs.clear()
         
