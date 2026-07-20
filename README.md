@@ -1,57 +1,151 @@
-# CancerCombo
+# CancerCombo: Deep Learning Framework for Cancer Drug Combination Dose-Response Surface Prediction
 
-CancerCombo is a modular, production-ready deep learning framework designed to predict complete dose-response matrices for cancer drug combinations. It utilizes differentiable pharmacological modeling constraints (the bivariate Hill equation) to output continuous, biophysically sound viability surfaces.
+**CancerCombo** is a modular, production-ready, biophysically constrained deep learning architecture designed to predict 2D dose-response viability matrices for cancer drug combinations. By integrating multi-modal drug representations (SMILES sequence embeddings, Morgan fingerprints, and physical descriptors) with cell-line gene expression profiles and a differentiable bivariate Hill equation solver, CancerCombo predicts continuous, smooth viability surfaces under strict permutation invariance.
 
-## Structure
-* `blocks/`: Contains the modular component layers.
-  * `molformer_encoder.py`: Semantic SMILES encoder.
-  * `morgan_encoder.py`: Topological Morgan fingerprint encoder.
-  * `descriptor_encoder.py`: Molecular descriptor encoder.
-  * `fusion.py`: Self-attention multi-modal fusion.
-  * `cell_encoder.py`: Cellular pathway encoder.
-  * `drug_cell_attention.py`: Cell-conditioning cross-attention.
-  * `drug_drug_attention.py`: Mutual drug interaction cross-attention.
-  * `shared_feature.py`: Symmetric pooling projection.
-  * `prediction_heads.py`: Eight parameter estimation heads.
-  * `hill_equation.py`: Differentiable Hill solver.
-* `config.yaml` / `config.py`: Configuration models.
-* `dataset.py` / `preprocessor.py`: Data loaders and feature engineering helpers.
-* `cancercombo.py`: Combined wrapper model.
-* `losses.py` / `metrics.py`: Loss functions and correlation metrics.
-* `trainer.py` / `train.py`: PyTorch Lightning wrappers and scripts.
-* `evaluate.py` / `evaluator.py`: Validation evaluation scripts.
-* `predictor.py`: Inference prediction pipeline.
-* `experimenter.py`: Ablation study pipeline.
-* `logger.py` / `helpers.py`: Logger and utilities.
-* `test_model.py` / `test_forward.py` / `test_hill.py`: Unit tests.
-* `main.py`: General command-line interface entry point.
+---
 
-## Installation
-Set up your virtual environment and install all packages:
-```bash
-python -m venv venv
-.\venv\Scripts\activate
-pip install -r requirements.txt
+## 🌟 Key Architectural Features
+
+- **Multi-Modal Drug Representations**: Combines HuggingFace MoLFormer sequence Transformer embeddings, 2048-bit RDKit Morgan fingerprints, and 200 physical descriptors via Multi-Head Self-Attention Fusion.
+- **Drug-Cell Cross-Attention**: Conditions drug representations on cell-line transcriptomics pathway tokens.
+- **Permutation Invariance**: Enforces mathematical symmetry $f(\text{Drug}_A, \text{Drug}_B) = f(\text{Drug}_B, \text{Drug}_A)$ via symmetric combination pooling.
+- **Differentiable Bivariate Hill Equation**: Predicts 8 log-space pharmacological parameters ($\log C_1, \log C_2, E_1, E_2, E_3, h_1, h_2, \alpha$) to reconstruct smooth 2D viability surfaces with autograd backpropagation.
+- **Numerical Safety Guarantees**: Built-in protection against `log(0)`, single-precision float overflow, and division by zero.
+- **Zero-Leakage Dataset Partitioning**: Precomputes Scenario 1 (Combination-wise), Scenario 2 (Cell-wise), and Scenario 3 (Drug-wise) splits.
+
+---
+
+## 📁  Structure
+
+```
+cancercombo/
+├── blocks/                           # Modular PyTorch Neural Network Building Blocks
+│   ├── cell_encoder.py               # Transcriptomics GEX pathway encoder
+│   ├── descriptor_encoder.py         # Physical descriptor MLP encoder
+│   ├── drug_cell_attention.py        # Drug-Cell cross-attention module
+│   ├── drug_drug_attention.py        # Mutual drug interaction cross-attention
+│   ├── fusion.py                     # Multi-representation self-attention fusion
+│   ├── hill_equation.py              # Differentiable 2D Bivariate Hill solver
+│   ├── molformer_encoder.py          # MoLFormer HuggingFace sequence encoder
+│   ├── morgan_encoder.py             # Morgan fingerprint MLP encoder
+│   ├── prediction_heads.py           # Log-space 8-parameter prediction heads
+│   └── shared_feature.py             # Symmetric combination fusion pooling
+├── data/                             # Dataset archives & pre-extracted features
+│   ├── DrugCombination_with_SMILES.zip # 1,000,000 sample benchmark archive
+│   ├── features/                     # Pre-extracted features
+│   │   ├── NCI-60_landmark_gex.csv   # NCI-60 landmark transcriptomics matrix
+│   │   ├── drug_features.pkl         # Precomputed Pickle drug feature store
+│   │   └── drug_features.pt          # Precomputed PyTorch drug feature store
+│   └── splits/                       # Precomputed 60/20/20 scenario splits
+│       ├── scenario1_combination.csv # Combination-wise split
+│       ├── scenario2_cell.csv        # Cell-wise split
+│       └── scenario3_drug.csv        # Unseen drug-wise split
+├── cancercombo.py                    # Top-level PyTorch neural network module
+├── config.py                         # Dataclass model & training configuration
+├── config.yaml                       # Primary hyperparameter YAML file
+├── dataset.py                        # Dataset loader & regex SMILES tokenizer
+├── evaluate.py                       # Checkpoint evaluation script
+├── evaluator.py                      # Batch model evaluator class
+├── experimenter.py                   # Multi-experiment hyperparameter sweep runner
+├── helpers.py                        # Seed setter & mock simulation generator
+├── logger.py                         # Formatted console logger setup
+├── losses.py                         # Composite loss function (MSE + Margin Ranking + Aux)
+├── main.py                           # Primary unified CLI router (train, evaluate, predict)
+├── metrics.py                        # Regression & synergy evaluation metrics
+├── precompute_molecular_features.py  # Standalone feature pre-extraction script
+├── predictor.py                      # Single & batch inference prediction engine
+├── preprocessor.py                   # RDKit Morgan & descriptor preprocessor
+├── requirements.txt                  # Pinned environment dependencies
+├── split_dataset.py                  # Scenario 1, 2, 3 dataset splitter script
+├── test_forward.py                   # PyTest shape verification suite
+├── test_hill.py                      # PyTest Hill solver numerical test suite
+└── test_model.py                     # PyTest model integration test suite
 ```
 
-## Running Tests
-Verify your system has correct dependencies and check dimensions and gradients:
+---
+
+## ⚙️ Installation
+
+1. Create and activate a Python 3.10+ virtual environment:
+   ```bash
+   python -m venv venv
+   # On Windows:
+   .\venv\Scripts\activate
+   # On Linux/macOS:
+   source venv/bin/activate
+   ```
+
+2. Install pinned dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+---
+
+## 🧪 Running Unit & Integration Tests
+
+Verify system installation, tensor shape propagation, autograd stability, and permutation invariance:
+
 ```bash
 python -m pytest
 ```
 
-## Training and Inference
-Run the training pipeline:
+Individual test suites can also be executed directly:
 ```bash
-python main.py --mode train
+python test_forward.py  # Shape propagation tests
+python test_hill.py     # Hill solver autograd & zero-dose numerical tests
+python test_model.py    # Full model integration & symmetry tests
 ```
 
-Run validation on a trained model:
+---
+
+## 📊 Dataset Partitioning & Feature Pre-computation
+
+### 1. Partition Dataset into Scenarios (60/20/20)
+Generate reproducible Scenario 1 (Combination-wise), Scenario 2 (Cell-wise), and Scenario 3 (Unseen Drug-wise) splits:
+
+```bash
+python split_dataset.py --input_csv data/DrugCombination_with_SMILES.zip --output_dir ./data/splits --seed 42
+```
+
+### 2. Precompute Drug Molecular Features
+Pre-extract Morgan fingerprints, 200 physical descriptors (Z-score normalized), and SMILES tokens to eliminate CPU bottlenecks during training:
+
+```bash
+python precompute_molecular_features.py --input_csv data/DrugCombination_with_SMILES.zip --output_file data/features/drug_features.pt
+```
+
+---
+
+## 🚀 Model Training, Evaluation & Inference
+
+### 1. Model Training
+Train CancerCombo using PyTorch Lightning with automatic mixed precision and GPU acceleration:
+
+```bash
+python main.py --mode train --config config.yaml
+```
+
+### 2. Checkpoint Evaluation
+Evaluate a trained model checkpoint on test dataset splits:
+
 ```bash
 python main.py --mode evaluate --checkpoint checkpoints/cancercombo_best.ckpt
 ```
 
-Run single drug-pair inference:
+### 3. Inference Prediction
+Run single-pair or batch dose-response matrix predictions:
+
 ```bash
 python main.py --mode predict --checkpoint checkpoints/cancercombo_best.ckpt
 ```
+
+---
+
+## 📈 Evaluation Metrics
+
+CancerCombo logs the following metrics during training and evaluation:
+- **MSE / RMSE / MAE**: Viability matrix surface reconstruction accuracy.
+- **$R^2$ Score**: Proportion of variance explained.
+- **Pearson ($r$) & Spearman ($r_s$)**: Linear and monotonic rank correlation.
+- **Top-$K$ Precision, Recall & Hit Rate**: Synergistic combination retrieval performance.
