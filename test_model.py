@@ -1,9 +1,15 @@
 import torch
-import pytest
+try:
+    import pytest
+    parametrize = pytest.mark.parametrize
+except ImportError:
+    pytest = None
+    def parametrize(*args, **kwargs):
+        return lambda fn: fn
 from config import ModelConfig
 from cancercombo import CancerCombo
 
-@pytest.mark.parametrize("enable_dd_attn", [True, False])
+@parametrize("enable_dd_attn", [True, False])
 def test_full_model_forward_and_backward(enable_dd_attn):
     """Test full forward pass, bounds checking, and backpropagation gradients."""
     config = ModelConfig(
@@ -108,3 +114,11 @@ def test_permutation_invariance():
         )
         
     assert torch.allclose(y_pred_ab, y_pred_ba.transpose(1, 2), atol=1e-5)
+
+
+if __name__ == "__main__":
+    test_full_model_forward_and_backward(False)
+    test_full_model_forward_and_backward(True)
+    test_permutation_invariance()
+    print("ALL MODEL TESTS PASSED SUCCESSFULLY!")
+

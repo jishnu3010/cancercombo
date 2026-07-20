@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoTokenizer
+try:
+    from transformers import AutoModel, AutoTokenizer
+except ImportError:
+    AutoModel, AutoTokenizer = None, None
 from typing import Tuple, Optional
 
 class MolFormerEncoder(nn.Module):

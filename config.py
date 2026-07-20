@@ -1,5 +1,8 @@
 import os
-import yaml
+try:
+    import yaml
+except ImportError:
+    yaml = None
 from dataclasses import dataclass
 from typing import Dict, Any
 

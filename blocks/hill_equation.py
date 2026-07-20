@@ -50,21 +50,54 @@ class BivariateHillSolver(nn.Module):
         else:
             doses_b_grid = doses_b
             
-        # Add epsilon to zero values to prevent gradient NaNs at zero dose points
-        doses_a_safe = torch.where(doses_a_grid > 0.0, doses_a_grid, torch.ones_like(doses_a_grid) * 1e-15)
-        doses_b_safe = torch.where(doses_b_grid > 0.0, doses_b_grid, torch.ones_like(doses_b_grid) * 1e-15)
-        
-        term_a = (doses_a_safe / c1_u) ** h1_u
-        term_b = (doses_b_safe / c2_u) ** h2_u
-        
-        # Zero out where actual dose was 0
-        term_a = torch.where(doses_a_grid > 0.0, term_a, torch.zeros_like(term_a))
-        term_b = torch.where(doses_b_grid > 0.0, term_b, torch.zeros_like(term_b))
-        
-        term_ab = term_a * term_b
-        
-        numerator = self.e0 + e1_u * term_a + e2_u * term_b + e3_u * alpha_u * term_ab
-        denominator = 1.0 + term_a + term_b + alpha_u * term_ab
-        
+        # Identify active dose masks
+        mask_a = doses_a_grid > 0.0
+        mask_b = doses_b_grid > 0.0
+        mask_ab = mask_a & mask_b
+
+        # Protect dose and concentration values before log() to prevent log(0), -inf, or NaN
+        doses_a_safe = torch.where(mask_a, doses_a_grid, torch.ones_like(doses_a_grid))
+        doses_b_safe = torch.where(mask_b, doses_b_grid, torch.ones_like(doses_b_grid))
+
+        c1_safe = torch.clamp(c1_u, min=1e-15)
+        c2_safe = torch.clamp(c2_u, min=1e-15)
+
+        log_x1 = torch.log(doses_a_safe)
+        log_x2 = torch.log(doses_b_safe)
+        log_c1 = torch.log(c1_safe)
+        log_c2 = torch.log(c2_safe)
+
+        # Log-space exponent calculations prior to exponentiation
+        exp_term_A = log_c1 * h1_u + log_c2 * h2_u
+        exp_term_B = log_x1 * h1_u + log_c2 * h2_u
+        exp_term_C = log_c1 * h1_u + log_x2 * h2_u
+        exp_term_D = log_x1 * h1_u + log_x2 * h2_u
+
+        # Compute maximum exponent across active terms per batch element for numerical stability
+        cand_A = exp_term_A
+        cand_B = torch.where(mask_a, exp_term_B, torch.full_like(exp_term_B, -1e9))
+        cand_C = torch.where(mask_b, exp_term_C, torch.full_like(exp_term_C, -1e9))
+        cand_D = torch.where(mask_ab, exp_term_D, torch.full_like(exp_term_D, -1e9))
+
+        max_exp = torch.maximum(
+            torch.maximum(cand_A, cand_B),
+            torch.maximum(cand_C, cand_D)
+        ).detach()
+
+        dummy_neg = torch.tensor(-100.0, device=doses_a_grid.device, dtype=doses_a_grid.dtype)
+
+        safe_A = torch.clamp(exp_term_A - max_exp, max=50.0)
+        safe_B = torch.clamp(torch.where(mask_a, exp_term_B - max_exp, dummy_neg), max=50.0)
+        safe_C = torch.clamp(torch.where(mask_b, exp_term_C - max_exp, dummy_neg), max=50.0)
+        safe_D = torch.clamp(torch.where(mask_ab, exp_term_D - max_exp, dummy_neg), max=50.0)
+
+        exp_A = torch.exp(safe_A)
+        exp_B = torch.where(mask_a, torch.exp(safe_B), torch.zeros_like(exp_term_B))
+        exp_C = torch.where(mask_b, torch.exp(safe_C), torch.zeros_like(exp_term_C))
+        exp_D = torch.where(mask_ab, torch.exp(safe_D), torch.zeros_like(exp_term_D))
+
+        numerator = self.e0 * exp_A + e1_u * exp_B + e2_u * exp_C + e3_u * alpha_u * exp_D
+        denominator = exp_A + exp_B + exp_C + alpha_u * exp_D
+
         y_pred = numerator / denominator
         return y_pred

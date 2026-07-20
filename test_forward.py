@@ -1,5 +1,8 @@
 import torch
-import pytest
+try:
+    import pytest
+except ImportError:
+    pytest = None
 from config import ModelConfig
 from blocks.molformer_encoder import MolFormerEncoder
 from blocks.morgan_encoder import MorganEncoder
@@ -51,3 +54,9 @@ def test_encoders_and_fusion_shapes():
     
     cond_drug = drug_cell(fused, cell_emb)
     assert cond_drug.shape == (batch_size, config.d_model)
+
+
+if __name__ == "__main__":
+    test_encoders_and_fusion_shapes()
+    print("ALL FORWARD SHAPE TESTS PASSED SUCCESSFULLY!")
+
