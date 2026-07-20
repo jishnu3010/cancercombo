@@ -61,6 +61,10 @@ class MolFormerEncoder(nn.Module):
         else:
             seq_feats = self.embedding(input_ids) + self.pos_encoder[:, :input_ids.size(1), :]
             key_padding_mask = ~(attention_mask.bool())
+            all_masked = key_padding_mask.all(dim=-1)
+            if all_masked.any():
+                key_padding_mask = key_padding_mask.clone()
+                key_padding_mask[all_masked, 0] = False
             seq_embeddings = self.transformer(seq_feats, src_key_padding_mask=key_padding_mask)
             seq_embeddings = self.proj(seq_embeddings)
             
