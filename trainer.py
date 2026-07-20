@@ -1,5 +1,13 @@
 import torch
-import pytorch_lightning as pl
+try:
+    import pytorch_lightning as pl
+except ImportError:
+    import torch.nn as _nn
+    class _DummyPLModule(_nn.Module):
+        def save_hyperparameters(self): pass
+        def log(self, *args, **kwargs): pass
+    pl = type("pl", (), {"LightningModule": _DummyPLModule})
+
 from config import ModelConfig, TrainingConfig
 from cancercombo import CancerCombo
 from losses import DeepSynBaLoss
@@ -100,17 +108,25 @@ class CancerComboLightningModule(pl.LightningModule):
         self.test_step_outputs.clear()
         
     def configure_optimizers(self) -> Dict[str, Any]:
-        optimizer = torch.optim.AdamW(
+        opt_name = getattr(self.training_config, "optimizer_name", "AdamW").lower()
+        if opt_name == "adam":
+            opt_cls = torch.optim.Adam
+        else:
+            opt_cls = torch.optim.AdamW
+
+        optimizer = opt_cls(
             self.parameters(),
             lr=self.training_config.lr,
             weight_decay=self.training_config.weight_decay
         )
+        factor = getattr(self.training_config, "scheduler_factor", 0.5)
+        patience = getattr(self.training_config, "scheduler_patience", 3)
+
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
             mode="min",
-            factor=0.5,
-            patience=3,
-            verbose=False
+            factor=factor,
+            patience=patience
         )
         return {
             "optimizer": optimizer,

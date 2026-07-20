@@ -10,7 +10,7 @@ model:
   use_pathway_projection: true
   n_pathways: 300
   molformer_model_name: "ibm/MoLFormer-XL-CIMA-100M"
-  use_pretrained_molformer: false
+  use_pretrained_molformer: true
   enable_drug_drug_attention: false
   use_symmetric_fusion: true
   e_min: 0.0
@@ -23,12 +23,16 @@ model:
   alpha_max: 100.0
 
 training:
-  batch_size: 32
-  epochs: 20
+  batch_size: 128
+  epochs: 100
+  optimizer_name: "AdamW"
+  scheduler_name: "ReduceLROnPlateau"
+  scheduler_factor: 0.5
+  scheduler_patience: 3
   lr: 1.0e-4
   weight_decay: 1.0e-5
   device: "cuda"
   checkpoint_dir: "checkpoints"
   save_top_k: 3
-  num_workers: 0
+  num_workers: 8
   seed: 42

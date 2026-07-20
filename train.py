@@ -1,8 +1,14 @@
 import os
 import torch
 from torch.utils.data import DataLoader
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint
+try:
+    import pytorch_lightning as pl
+    from pytorch_lightning.callbacks import ModelCheckpoint
+except ImportError:
+    pl = None
+    class ModelCheckpoint:
+        def __init__(self, *args, **kwargs): pass
+
 from config import load_config
 from dataset import DrugComboDataset
 from trainer import CancerComboLightningModule
@@ -50,6 +56,7 @@ def run_training(config_path: str = "config.yaml"):
         max_epochs=t_config.epochs,
         accelerator=accelerator,
         devices=devices,
+        gradient_clip_val=5.0,
         callbacks=[checkpoint_callback],
         enable_checkpointing=True,
         log_every_n_steps=1

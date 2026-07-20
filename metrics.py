@@ -1,5 +1,16 @@
 import numpy as np
-from scipy.stats import pearsonr, spearmanr
+try:
+    from scipy.stats import pearsonr, spearmanr
+except ImportError:
+    def pearsonr(x, y):
+        corr = np.corrcoef(x, y)[0, 1]
+        return corr, 0.0
+    def spearmanr(x, y):
+        # Fallback rank correlation
+        rx = np.argsort(np.argsort(x))
+        ry = np.argsort(np.argsort(y))
+        corr = np.corrcoef(rx, ry)[0, 1]
+        return corr, 0.0
 from typing import Dict
 
 def calculate_metrics(y_pred: np.ndarray, y_true: np.ndarray) -> Dict[str, float]:

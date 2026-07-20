@@ -1,7 +1,10 @@
 import os
 import torch
 from torch.utils.data import DataLoader
-import pytorch_lightning as pl
+try:
+    import pytorch_lightning as pl
+except ImportError:
+    pl = None
 from config import load_config
 from dataset import DrugComboDataset
 from trainer import CancerComboLightningModule

@@ -42,6 +42,10 @@ class TrainingConfig:
     save_top_k: int
     num_workers: int
     seed: int
+    optimizer_name: str = "AdamW"
+    scheduler_name: str = "ReduceLROnPlateau"
+    scheduler_factor: float = 0.5
+    scheduler_patience: int = 3
 
 def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, TrainingConfig]:
     """Loads configuration parameters from config.yaml and returns dataclass objects.
@@ -59,7 +63,32 @@ def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, Training
         raise FileNotFoundError(f"Config file not found at: {config_path}")
         
     with open(config_path, "r", encoding="utf-8") as f:
-        config_dict = yaml.safe_load(f)
+        if yaml is not None:
+            config_dict = yaml.safe_load(f)
+        else:
+            content = f.read()
+            config_dict = {}
+            curr = None
+            for line in content.splitlines():
+                line_clean = line.split('#')[0].rstrip()
+                if not line_clean.strip():
+                    continue
+                if not line.startswith(' ') and line_clean.endswith(':'):
+                    curr = line_clean.strip()[:-1]
+                    config_dict[curr] = {}
+                elif curr and ':' in line_clean:
+                    k, v = line_clean.split(':', 1)
+                    k = k.strip()
+                    v = v.strip().strip('"').strip("'")
+                    if v.lower() == 'true': v = True
+                    elif v.lower() == 'false': v = False
+                    else:
+                        try:
+                            if '.' in v or 'e' in v.lower(): v = float(v)
+                            else: v = int(v)
+                        except ValueError:
+                            pass
+                    config_dict[curr][k] = v
         
     model_data = config_dict["model"]
     training_data = config_dict["training"]
@@ -99,7 +128,11 @@ def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, Training
         checkpoint_dir=str(training_data["checkpoint_dir"]),
         save_top_k=int(training_data["save_top_k"]),
         num_workers=int(training_data["num_workers"]),
-        seed=int(training_data["seed"])
+        seed=int(training_data["seed"]),
+        optimizer_name=str(training_data.get("optimizer_name", "AdamW")),
+        scheduler_name=str(training_data.get("scheduler_name", "ReduceLROnPlateau")),
+        scheduler_factor=float(training_data.get("scheduler_factor", 0.5)),
+        scheduler_patience=int(training_data.get("scheduler_patience", 3))
     )
     
     return model_config, training_config
