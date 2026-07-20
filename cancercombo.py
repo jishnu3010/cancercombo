@@ -149,7 +149,7 @@ class CancerCombo(nn.Module):
             z_combo = self.asym_linear(z_combo)
             
         # Step 8: Predict Pharmacological parameters
-        e1, e2, e3, log_c1, log_c2, h1, h2, alpha = self.heads(z_combo)
+        e1, e2, e3, log_c1, log_c2, h1, h2, alpha = self.heads(aware_a, aware_b, z_combo)
         
         # Step 9: Differentiable Hill Solver
         y_pred = self.hill_solver(

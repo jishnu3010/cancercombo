@@ -17,22 +17,30 @@ from losses import CancerComboLoss
 from helpers import set_seed, generate_mock_data
 from logger import setup_logger
 
-def run_training(config_path: str = "config.yaml"):
+def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None, max_samples: Optional[int] = None):
     """Initializes dataset generators and executes full model training.
 
     Args:
         config_path: Path to configuration file.
+        epochs: Optional epoch override.
+        max_samples: Optional maximum dataset samples limit.
     """
     logger = setup_logger("CancerCombo Train")
     logger.info("Loading configs and setting seed...")
     
     m_config, t_config = load_config(config_path)
+    if epochs is not None:
+        t_config.epochs = epochs
     set_seed(t_config.seed)
     
     logger.info("Attempting to load real dataset archives...")
     real_gex = load_nci60_gex("data/features/NCI-60_landmark_gex.csv", target_dim=m_config.cell_in_dim)
     real_data = load_synergy_dataset("data/DrugCombination_with_SMILES.zip")
     
+    if max_samples is not None and real_data and len(real_data) > max_samples:
+        real_data = real_data[:max_samples]
+        logger.info(f"Subsampled dataset to {len(real_data)} samples for fast execution.")
+        
     if real_data and len(real_data) >= 10:
         logger.info(f"Loaded {len(real_data)} real drug combination samples from archive.")
         split_idx = int(len(real_data) * 0.8)
