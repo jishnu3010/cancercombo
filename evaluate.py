@@ -2,7 +2,7 @@ import os
 import torch
 from torch.utils.data import DataLoader
 from config import load_config
-from dataset import DrugComboDataset
+from dataset import DrugComboDataset, load_nci60_gex, load_synergy_dataset
 from cancercombo import CancerCombo
 from evaluator import ModelEvaluator
 from helpers import generate_mock_data
@@ -16,13 +16,23 @@ def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", c
         config_path: Path to configuration YAML.
     """
     logger = setup_logger("CancerCombo Eval")
-    logger.info("Setting up configs and mock evaluation dataset...")
+    logger.info("Setting up configs and test dataset split...")
     
     m_config, _ = load_config(config_path)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    logger.info("Generating evaluation dataset...")
-    test_data, cell_features = generate_mock_data(32)
+    logger.info("Attempting to load real test dataset split...")
+    test_real = load_synergy_dataset("data/DrugCombination_with_SMILES.zip", split='test')
+    real_gex = load_nci60_gex("data/features/NCI-60_landmark_gex.csv", target_dim=m_config.cell_in_dim)
+    
+    if test_real and len(test_real) >= 5:
+        logger.info(f"Loaded {len(test_real)} real test split samples from archive.")
+        test_data = test_real
+        cell_features = real_gex
+    else:
+        logger.info("Real test dataset archive not found. Generating synthetic test dataset for evaluation...")
+        test_data, cell_features = generate_mock_data(32)
+        
     test_dataset = DrugComboDataset(test_data, cell_features)
     test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
     
