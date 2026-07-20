@@ -9,6 +9,7 @@ except ImportError:
     class ModelCheckpoint:
         def __init__(self, *args, **kwargs): pass
 
+from typing import Optional
 from config import load_config
 from dataset import DrugComboDataset, load_nci60_gex, load_synergy_dataset
 from trainer import CancerComboLightningModule
