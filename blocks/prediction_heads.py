@@ -4,7 +4,7 @@ import torch.nn as nn
 from config import ModelConfig
 from typing import Tuple
 
-class DeepSynBaPredictionHeads(nn.Module):
+class CancerComboPredictionHeads(nn.Module):
     """Eight independent MLP heads predicting constrained pharmacological parameters."""
     
     def __init__(self, config: ModelConfig):

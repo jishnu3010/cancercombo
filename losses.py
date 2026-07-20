@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Dict, Tuple
 
-class DeepSynBaLoss(nn.Module):
+class CancerComboLoss(nn.Module):
     """Composite loss module combining Mean Squared Error over dose viability matrices,
     pairwise Margin Ranking Loss (for Spearman rank correlation optimization),
     and optional Auxiliary Parameter Supervision loss.

@@ -10,7 +10,7 @@ except ImportError:
 
 from config import ModelConfig, TrainingConfig
 from cancercombo import CancerCombo
-from losses import DeepSynBaLoss
+from losses import CancerComboLoss
 from metrics import calculate_metrics
 import numpy as np
 from typing import Dict, Any, Tuple, List
@@ -25,7 +25,7 @@ class CancerComboLightningModule(pl.LightningModule):
         self.training_config = training_config
         
         self.model = CancerCombo(model_config)
-        self.loss_fn = DeepSynBaLoss()
+        self.loss_fn = CancerComboLoss()
         
         self.validation_step_outputs: List[Dict[str, np.ndarray]] = []
         self.test_step_outputs: List[Dict[str, np.ndarray]] = []

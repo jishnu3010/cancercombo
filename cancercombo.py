@@ -10,23 +10,22 @@ from blocks.drug_cell_attention import DrugCellCrossAttention
 # DISABLED: Drug–Drug Attention
 # from blocks.drug_drug_attention import DrugDrugCrossAttention
 from blocks.shared_feature import SymmetricComboFusion
-from blocks.prediction_heads import DeepSynBaPredictionHeads
+from blocks.prediction_heads import CancerComboPredictionHeads
 from blocks.hill_equation import BivariateHillSolver
 from typing import Tuple, Optional
 
 class CancerCombo(nn.Module):
-    """Main wrapper class for the CancerCombo architecture."""
+    """CancerCombo End-to-End Deep Learning Architecture for Dose-Response Prediction."""
     
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
         
-        # Instantiate chemical feature encoders
+        # Drug encoders
         self.molformer_enc = MolFormerEncoder(
+            model_name=config.molformer_model_name,
             d_model=config.d_model,
-            molformer_in_dim=config.molformer_in_dim,
-            use_pretrained=config.use_pretrained_molformer,
-            model_name=config.molformer_model_name
+            use_pretrained=config.use_pretrained_molformer
         )
         self.morgan_enc = MorganEncoder(
             in_dim=config.morgan_in_dim,
@@ -77,7 +76,7 @@ class CancerCombo(nn.Module):
             self.asym_linear = nn.Linear(config.d_model * 2, config.d_model)
         
         # Prediction heads block
-        self.heads = DeepSynBaPredictionHeads(config)
+        self.heads = CancerComboPredictionHeads(config)
         
         # Bivariate Hill equation solver
         self.hill_solver = BivariateHillSolver(e0=100.0)

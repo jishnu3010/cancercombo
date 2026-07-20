@@ -2,7 +2,7 @@
 """
 split_dataset.py - Production-Ready Dataset Splitting Pipeline for CancerCombo
 
-Implements the DeepSynBa benchmark evaluation protocol across three independent partitioning scenarios:
+Implements benchmark evaluation protocols across three independent partitioning scenarios:
   1. Scenario 1 — Combination-Wise Split (60/20/20 on canonicalized drug pairs)
   2. Scenario 2 — Cell-Wise Split (60/20/20 on unique cell lines)
   3. Scenario 3 — Drug-Wise Split (60/20/20 on unique drugs with zero drug leakage)
@@ -347,7 +347,7 @@ def drug_split(
         f"Train={len(train_drugs)}, Val={len(val_drugs)}, Test={len(test_drugs)}"
     )
     
-    # 4. Vectorized fast categorization according to the DeepSynBa evaluation protocol
+    # 4. Vectorized fast categorization according to benchmark evaluation protocol
     n_samples = len(df)
     assigned_splits = np.full(n_samples, -1, dtype=int)
     
@@ -530,7 +530,7 @@ def print_scenario_summary(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Production-Ready Dataset Splitting Pipeline for CancerCombo (DeepSynBa Protocol)"
+        description="Production-Ready Dataset Splitting Pipeline for CancerCombo"
     )
     parser.add_argument(
         "--input_csv",
