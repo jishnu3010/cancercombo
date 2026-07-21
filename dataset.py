@@ -67,6 +67,10 @@ def load_nci60_gex(csv_path: str = "data/features/NCI-60_landmark_gex.csv", targ
         df = pd.read_csv(csv_path)
         # First column is gene names, remaining columns are canonical cell line names
         cell_lines = df.columns[1:]
+        # Impute missing gene values with gene-wise median across cell lines
+        df[cell_lines] = df[cell_lines].apply(lambda row: row.fillna(row.median()), axis=1)
+        df[cell_lines] = df[cell_lines].fillna(0.0)
+        
         gex_dict = {}
         for cell in cell_lines:
             vec = df[cell].values.astype(np.float32)
@@ -144,7 +148,6 @@ def parse_dataframe_to_records(df: pd.DataFrame, known_gex_dict: Dict[str, np.nd
 
     # First check if the dataframe is already pre-grouped records (e.g., has doses_a as list or matrix)
     if 'viability_matrix' in df.columns or 'doses_a' in df.columns:
-        # Pre-grouped or pre-processed rows
         records = df.to_dict('records')
         data_list = []
         for row in records:
@@ -183,17 +186,20 @@ def parse_dataframe_to_records(df: pd.DataFrame, known_gex_dict: Dict[str, np.nd
             })
         return data_list
 
-    # Otherwise, group raw 16-row per Sample dataframe into 2D dose-response matrix surfaces
-    grouped = df.groupby('Sample', sort=False)
-    data_list = []
+    # Vectorized fast grouping for raw 16-row per Sample dataframe
+    df_clean = df.dropna(subset=['Response']).copy()
+    df_sorted = df_clean.sort_values(['Sample', 'Drug1_Dose', 'Drug2_Dose']).reset_index(drop=True)
+    
+    # Extract unique sample metadata headers
+    first_rows = df_sorted.drop_duplicates(subset=['Sample'], keep='first').copy()
     
     matched_count = 0
     unmatched_count = 0
     unique_cells = set()
     unmatched_names = set()
     
-    for sample_name, group in grouped:
-        # Check cell line matching
+    sample_to_cell = {}
+    for sample_name in first_rows['Sample'].values:
         if known_cells_map:
             cell = match_cell_line(sample_name, known_cells_map)
             if cell is None or cell not in known_gex_dict:
@@ -202,47 +208,57 @@ def parse_dataframe_to_records(df: pd.DataFrame, known_gex_dict: Dict[str, np.nd
                 continue
             matched_count += 1
             unique_cells.add(cell)
+            sample_to_cell[sample_name] = cell
         else:
-            cell = str(sample_name)
+            sample_to_cell[sample_name] = str(sample_name)
 
-        # Get drug SMILES
-        s_a = group['Drug1_SMILES'].iloc[0] if 'Drug1_SMILES' in group.columns else group['Drug1'].iloc[0]
-        s_b = group['Drug2_SMILES'].iloc[0] if 'Drug2_SMILES' in group.columns else group['Drug2'].iloc[0]
-        
-        # Check SMILES validity
-        if pd.isna(s_a) or pd.isna(s_b) or not str(s_a).strip() or not str(s_b).strip():
+    valid_samples = [s for s in first_rows['Sample'].values if s in sample_to_cell]
+    valid_set = set(valid_samples)
+    
+    df_valid = df_sorted[df_sorted['Sample'].isin(valid_set)].copy()
+    
+    # Verify exact 16-row matrix requirement per sample
+    sample_counts = df_valid['Sample'].value_counts()
+    valid_16_samples = set(sample_counts[sample_counts == 16].index)
+    df_valid = df_valid[df_valid['Sample'].isin(valid_16_samples)].copy()
+    
+    first_rows_valid = first_rows[first_rows['Sample'].isin(valid_16_samples)].copy()
+    
+    s_a_col = 'Drug1_SMILES' if 'Drug1_SMILES' in first_rows_valid.columns else 'Drug1'
+    s_b_col = 'Drug2_SMILES' if 'Drug2_SMILES' in first_rows_valid.columns else 'Drug2'
+    
+    responses_all = df_valid['Response'].values.astype(np.float32).reshape(-1, 4, 4)
+    doses_a_all = df_valid.groupby('Sample', sort=False)['Drug1_Dose'].unique()
+    doses_b_all = df_valid.groupby('Sample', sort=False)['Drug2_Dose'].unique()
+
+    data_list = []
+    sample_idx = 0
+    
+    for _, row in first_rows_valid.iterrows():
+        sample_name = row['Sample']
+        s_a = str(row[s_a_col])
+        s_b = str(row[s_b_col])
+        if pd.isna(s_a) or pd.isna(s_b) or not s_a.strip() or not s_b.strip():
+            sample_idx += 1
             continue
             
-        d_a_unique = np.sort(group['Drug1_Dose'].unique())
-        d_b_unique = np.sort(group['Drug2_Dose'].unique())
+        cell = sample_to_cell[sample_name]
+        d_a = np.sort(doses_a_all[sample_name]).tolist()
+        d_b = np.sort(doses_b_all[sample_name]).tolist()
+        viab = responses_all[sample_idx].tolist()
         
-        # Build dose-response viability matrix
-        matrix = np.zeros((len(d_a_unique), len(d_b_unique)), dtype=np.float32)
-        valid_matrix = True
-        
-        for _, row in group.iterrows():
-            r_val = row['Response']
-            if pd.isna(r_val):
-                valid_matrix = False
-                break
-            i = np.where(d_a_unique == row['Drug1_Dose'])[0][0]
-            j = np.where(d_b_unique == row['Drug2_Dose'])[0][0]
-            matrix[i, j] = float(r_val)
-            
-        if not valid_matrix:
-            continue
-            
         data_list.append({
-            "smiles_a": str(s_a),
-            "smiles_b": str(s_b),
-            "cell_line_name": str(cell),
-            "doses_a": d_a_unique.tolist(),
-            "doses_b": d_b_unique.tolist(),
-            "viability_matrix": matrix.tolist()
+            "smiles_a": s_a,
+            "smiles_b": s_b,
+            "cell_line_name": cell,
+            "doses_a": d_a,
+            "doses_b": d_b,
+            "viability_matrix": viab
         })
-        
+        sample_idx += 1
+
     if known_cells_map:
-        total_samples = len(grouped)
+        total_samples = len(first_rows)
         match_pct = (matched_count / total_samples * 100) if total_samples > 0 else 0
         print("\n" + "=" * 60)
         print("CELL-LINE EXTRACTION & PARSING REPORT")
@@ -358,6 +374,7 @@ class DrugComboDataset(Dataset):
         cell_vec = self.cell_line_features.get(cell_name, self.cell_line_features.get(norm_cell))
         if cell_vec is None:
             raise KeyError(f"Cell line features for '{cell_name}' not found. Do not zero-pad.")
+        assert cell_vec.shape[-1] == 976, f"Expected 976-dim gene expression vector, got {cell_vec.shape[-1]}"
             
         res_dict = {
             "drug_a_ids": torch.tensor(ids_a, dtype=torch.long),

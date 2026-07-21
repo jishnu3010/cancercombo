@@ -35,7 +35,7 @@ def generate_mock_data(num_samples: int = 64) -> Tuple[List[Dict[str, Any]], Dic
     cell_names = ["MCF7", "A549", "HELA", "K562"]
     
     cell_line_features = {
-        name: np.random.randn(20000).astype(np.float32) for name in cell_names
+        name: np.random.randn(976).astype(np.float32) for name in cell_names
     }
     
     data_list = []

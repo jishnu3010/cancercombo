@@ -6,7 +6,7 @@ class CellLineEncoder(nn.Module):
     
     def __init__(
         self,
-        in_dim: int = 20000,
+        in_dim: int = 976,
         d_model: int = 256,
         n_pathways: int = 300,
         use_pathway_projection: bool = True,

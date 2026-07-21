@@ -25,7 +25,7 @@ def run_prediction_cli(checkpoint_path: str):
     smiles_a = "CC(=O)NC1=CC=C(C=C1)O"
     smiles_b = "CC1=CC(=C(C=C1)NC(=O)C2=CC=C(C=C2)CN3CCN(CC3)C)NC4=NC=CC(=N4)C5=CN=CC=C5"
     
-    cell_line_gene_expr = np.random.randn(20000).astype(np.float32)
+    cell_line_gene_expr = np.random.randn(976).astype(np.float32)
     doses_a = np.array([0.0, 0.1, 1.0, 10.0], dtype=np.float32)
     doses_b = np.array([0.0, 0.2, 2.0, 20.0], dtype=np.float32)
     

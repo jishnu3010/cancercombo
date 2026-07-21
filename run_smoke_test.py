@@ -127,7 +127,7 @@ def run_smoke_test():
     torch.save({"state_dict": model.state_dict(), "config": m_config}, ckpt_path)
     
     fresh_model = CancerCombo(m_config)
-    ckpt = torch.load(ckpt_path, map_location="cpu")
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     fresh_model.load_state_dict(ckpt["state_dict"])
     fresh_model.eval()
     print("  [PASS] Checkpoint saved and reloaded into fresh model.")
