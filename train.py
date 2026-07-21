@@ -18,13 +18,16 @@ from losses import CancerComboLoss
 from helpers import set_seed, generate_mock_data
 from logger import setup_logger
 
-def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None, max_samples: Optional[int] = None):
+import argparse
+
+def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None, max_samples: Optional[int] = None, scenario: int = 1):
     """Initializes dataset generators and executes full model training.
 
     Args:
         config_path: Path to configuration file.
         epochs: Optional epoch override.
         max_samples: Optional maximum dataset samples limit.
+        scenario: The split scenario to use (1, 2, or 3).
     """
     logger = setup_logger("CancerCombo Train")
     logger.info("Loading configs and setting seed...")
@@ -36,7 +39,39 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
     
     logger.info("Attempting to load real dataset archives...")
     real_gex = load_nci60_gex("data/features/NCI-60_landmark_gex.csv", target_dim=m_config.cell_in_dim)
-    real_data = load_synergy_dataset("data/DrugCombination_with_SMILES.zip")
+    
+    # Map scenario number to split file path
+    scenario_files = {
+        1: "data/splits/scenario1_combination.csv",
+        2: "data/splits/scenario2_cell.csv",
+        3: "data/splits/scenario3_drug.csv"
+    }
+    split_path = scenario_files.get(scenario, scenario_files[1])
+    
+    if not os.path.exists(split_path):
+        logger.error(f"Scenario split file not found: {split_path}. Run split_dataset.py first.")
+        return
+        
+    logger.info(f"Loading split scenario from {split_path}...")
+    import pandas as pd
+    split_df = pd.read_csv(split_path)
+    
+    if "split" not in split_df.columns:
+        logger.error(f"Split file missing 'split' column: {split_path}")
+        return
+        
+    train_df = split_df[split_df["split"] == 1].copy()
+    val_df = split_df[split_df["split"] == 2].copy()
+    
+    if max_samples is not None:
+        train_df = train_df.head(max_samples)
+        val_df = val_df.head(max_samples // 4)
+        
+    from dataset import parse_dataframe_to_records
+    train_data = parse_dataframe_to_records(train_df, known_cells=set(real_gex.keys()))
+    val_data = parse_dataframe_to_records(val_df, known_cells=set(real_gex.keys()))
+    cell_features = real_gex
+    
     drug_features = load_precomputed_drug_features("data/features/drug_features.pt")
     if not drug_features:
         drug_features = load_precomputed_drug_features("data/features/drug_features.pkl")
@@ -44,21 +79,6 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
         logger.info(f"Loaded precomputed drug features for {len(drug_features)} SMILES strings.")
     else:
         logger.info("No precomputed drug feature store found. Falling back to on-the-fly preprocessing.")
-    
-    if max_samples is not None and real_data and len(real_data) > max_samples:
-        real_data = real_data[:max_samples]
-        logger.info(f"Subsampled dataset to {len(real_data)} samples for fast execution.")
-        
-    if real_data and len(real_data) >= 10:
-        logger.info(f"Loaded {len(real_data)} real drug combination samples from archive.")
-        split_idx = int(len(real_data) * 0.8)
-        train_data = real_data[:split_idx]
-        val_data = real_data[split_idx:]
-        cell_features = real_gex
-    else:
-        logger.info("Real dataset archive not found or incomplete. Generating synthetic datasets for simulation...")
-        train_data, cell_features = generate_mock_data(64)
-        val_data, _ = generate_mock_data(16)
     
     train_dataset = DrugComboDataset(train_data, cell_features, drug_feature_store=drug_features)
     val_dataset = DrugComboDataset(val_data, cell_features, drug_feature_store=drug_features)
@@ -158,4 +178,16 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
     logger.info("Training finished successfully.")
 
 if __name__ == "__main__":
-    run_training()
+    parser = argparse.ArgumentParser(description="Train CancerCombo")
+    parser.add_argument("--config", type=str, default="config.yaml")
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--max_samples", type=int, default=None)
+    parser.add_argument("--scenario", type=int, default=1, help="Split scenario (1, 2, or 3)")
+    args = parser.parse_args()
+    
+    run_training(
+        config_path=args.config,
+        epochs=args.epochs,
+        max_samples=args.max_samples,
+        scenario=args.scenario
+    )

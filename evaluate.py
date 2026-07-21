@@ -63,12 +63,13 @@ class ModelEvaluator:
 
         return calculate_metrics(preds, trues)
 
-def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", config_path: str = "config.yaml"):
+def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", config_path: str = "config.yaml", scenario: int = 1):
     """Load model checkpoint and evaluate performance.
 
     Args:
         checkpoint_path: Path to checkpoint.
         config_path: Path to configuration YAML.
+        scenario: Split scenario (1, 2, or 3).
     """
     logger = setup_logger("CancerCombo Eval")
     logger.info("Setting up configs and real held-out evaluation dataset...")
@@ -76,11 +77,17 @@ def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", c
     m_config, _ = load_config(config_path)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    split_path = "data/splits/scenario1_combination.csv"
+    scenario_files = {
+        1: "data/splits/scenario1_combination.csv",
+        2: "data/splits/scenario2_cell.csv",
+        3: "data/splits/scenario3_drug.csv"
+    }
+    split_path = scenario_files.get(scenario, scenario_files[1])
+    
     if not os.path.exists(split_path):
         logger.error(
             f"Held-out split file not found: {split_path}. "
-            "Run split_dataset.py first and save the scenario-1 split there."
+            "Run split_dataset.py first and save the scenario split there."
         )
         return
 
@@ -100,7 +107,8 @@ def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", c
         logger.error("Cell feature file not found or unreadable: data/features/NCI-60_landmark_gex.csv")
         return
 
-    test_records = test_df.to_dict("records")
+    from dataset import parse_dataframe_to_records
+    test_records = parse_dataframe_to_records(test_df, known_cells=set(cell_features.keys()))
     test_dataset = DrugComboDataset(test_records, cell_features)
     test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
     
@@ -125,10 +133,17 @@ def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", c
         logger.info(f"  {metric.upper()}: {val:.4f}")
 
 if __name__ == "__main__":
-    ckpt_path = "checkpoints/cancercombo_best.ckpt"
+    import argparse
+    parser = argparse.ArgumentParser(description="Evaluate CancerCombo")
+    parser.add_argument("--checkpoint", type=str, default="checkpoints/cancercombo_best.ckpt")
+    parser.add_argument("--config", type=str, default="config.yaml")
+    parser.add_argument("--scenario", type=int, default=1, help="Split scenario (1, 2, or 3)")
+    args = parser.parse_args()
+    
+    ckpt_path = args.checkpoint
     if not os.path.exists(ckpt_path):
         if os.path.exists("checkpoints"):
             files = [f for f in os.listdir("checkpoints") if f.endswith(".ckpt")]
             if files:
                 ckpt_path = os.path.join("checkpoints", files[0])
-    run_evaluation(ckpt_path)
+    run_evaluation(ckpt_path, config_path=args.config, scenario=args.scenario)

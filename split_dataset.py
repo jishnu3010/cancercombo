@@ -13,12 +13,13 @@ Usage:
 
 import os
 import sys
-import argparse
 import logging
+import argparse
 import zipfile
-import pandas as pd
 import numpy as np
+import pandas as pd
 from typing import Tuple, List, Set, Dict, Any, Optional
+from dataset import match_cell_line, load_nci60_gex
 
 # Set up logger
 logging.basicConfig(
@@ -590,6 +591,15 @@ def main():
     
     # 2. Resolve Column Names
     drug1_col, drug2_col, cell_col = detect_columns(df, args.drug1_col, args.drug2_col, args.cell_col)
+    
+    # 2.5 Extract Robust Cell Lines before Splitting
+    logger.info("Extracting known cell lines for correct cell-wise splitting...")
+    gex_dict = load_nci60_gex()
+    known_cells = set(gex_dict.keys())
+    
+    if known_cells:
+        df["_extracted_cell"] = df[cell_col].apply(lambda x: match_cell_line(str(x), known_cells))
+        cell_col = "_extracted_cell"
     
     # -----------------------------------------------------------------
     # SCENARIO 1 — COMBINATION-WISE SPLIT

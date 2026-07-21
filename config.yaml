@@ -6,7 +6,7 @@ model:
   molformer_in_dim: 768
   morgan_in_dim: 2048
   descriptor_in_dim: 200
-  cell_in_dim: 20000
+  cell_in_dim: 976
   use_pathway_projection: true
   n_pathways: 300
   molformer_model_name: "ibm/MoLFormer-XL-CIMA-100M"
