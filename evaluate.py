@@ -107,9 +107,12 @@ def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", c
         logger.error("Cell feature file not found or unreadable: data/features/NCI-60_landmark_gex.csv")
         return
 
-    from dataset import parse_dataframe_to_records
+    from dataset import parse_dataframe_to_records, load_precomputed_drug_features
     test_records = parse_dataframe_to_records(test_df, known_gex_dict=cell_features)
-    test_dataset = DrugComboDataset(test_records, cell_features)
+    drug_features = load_precomputed_drug_features("data/features/drug_features.pt")
+    if not drug_features:
+        drug_features = load_precomputed_drug_features("data/features/drug_features.pkl")
+    test_dataset = DrugComboDataset(test_records, cell_features, drug_feature_store=drug_features)
     test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
     
     logger.info(f"Loading checkpoint: {checkpoint_path}")

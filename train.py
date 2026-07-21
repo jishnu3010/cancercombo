@@ -142,7 +142,7 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
                     b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
                     b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
                 )
-                loss = loss_fn(y_pred, b_gpu["viability_matrix"], params)
+                loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=5.0)
                 optimizer.step()
@@ -161,7 +161,7 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
                         b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
                         b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
                     )
-                    v_loss = loss_fn(y_pred, b_gpu["viability_matrix"], params)
+                    v_loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
                     val_loss_sum += v_loss.item()
                     
             val_loss = val_loss_sum / max(len(val_loader), 1)

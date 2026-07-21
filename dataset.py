@@ -408,7 +408,7 @@ def load_precomputed_drug_features(feature_path: str) -> Dict[str, Dict[str, Any
 
     try:
         if feature_path.endswith(".pt"):
-            return torch.load(feature_path, map_location="cpu")
+            return torch.load(feature_path, map_location="cpu", weights_only=False)
         if feature_path.endswith(".pkl"):
             with open(feature_path, "rb") as f:
                 return pickle.load(f)

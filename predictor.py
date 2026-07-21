@@ -14,7 +14,7 @@ class SynergyPredictor:
         self.device = torch.device(device)
         self.model = CancerCombo(config)
         
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
         state_dict = checkpoint.get("state_dict", checkpoint)
         # Strip PyTorch Lightning 'model.' prefix if present
         state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
@@ -56,17 +56,17 @@ class SynergyPredictor:
         # Prepare inputs
         t_ids_a = torch.tensor([ids_a], dtype=torch.long, device=self.device)
         t_mask_a = torch.tensor([mask_a], dtype=torch.float32, device=self.device)
-        t_morgan_a = torch.tensor([morgan_a], dtype=torch.float32, device=self.device)
-        t_desc_a = torch.tensor([desc_a], dtype=torch.float32, device=self.device)
+        t_morgan_a = torch.tensor(np.array([morgan_a]), dtype=torch.float32, device=self.device)
+        t_desc_a = torch.tensor(np.array([desc_a]), dtype=torch.float32, device=self.device)
         
         t_ids_b = torch.tensor([ids_b], dtype=torch.long, device=self.device)
         t_mask_b = torch.tensor([mask_b], dtype=torch.float32, device=self.device)
-        t_morgan_b = torch.tensor([morgan_b], dtype=torch.float32, device=self.device)
-        t_desc_b = torch.tensor([desc_b], dtype=torch.float32, device=self.device)
+        t_morgan_b = torch.tensor(np.array([morgan_b]), dtype=torch.float32, device=self.device)
+        t_desc_b = torch.tensor(np.array([desc_b]), dtype=torch.float32, device=self.device)
         
-        t_cell = torch.tensor([cell_line_gene_expr], dtype=torch.float32, device=self.device)
-        t_doses_a = torch.tensor([doses_a], dtype=torch.float32, device=self.device)
-        t_doses_b = torch.tensor([doses_b], dtype=torch.float32, device=self.device)
+        t_cell = torch.tensor(np.array([cell_line_gene_expr]), dtype=torch.float32, device=self.device)
+        t_doses_a = torch.tensor(np.array([doses_a]), dtype=torch.float32, device=self.device)
+        t_doses_b = torch.tensor(np.array([doses_b]), dtype=torch.float32, device=self.device)
         
         with torch.no_grad():
             y_pred, params = self.model(

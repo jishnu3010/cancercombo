@@ -4,6 +4,12 @@ from rdkit.Chem import Descriptors, rdMolDescriptors
 from typing import Tuple, Optional
 from functools import lru_cache
 
+try:
+    from rdkit.Chem import rdFingerprintGenerator
+    HAS_GENERATOR = True
+except ImportError:
+    HAS_GENERATOR = False
+
 class MolecularPreprocessor:
     """RDKit chemistry preprocessor mapping SMILES strings to numerical representations with LRU caching."""
     
@@ -13,6 +19,10 @@ class MolecularPreprocessor:
         self.descriptor_names = [desc[0] for desc in Descriptors._descList][:200]
         self.cache_size = cache_size
         self._cache = {}
+        if HAS_GENERATOR:
+            self._generator = rdFingerprintGenerator.GetMorganGenerator(radius=self.morgan_radius, fpSize=self.morgan_nbits)
+        else:
+            self._generator = None
         
     def smiles_to_mol(self, smiles: str) -> Optional[Chem.Mol]:
         """Convert SMILES to RDKit Mol object.
@@ -43,9 +53,12 @@ class MolecularPreprocessor:
         if mol is None:
             return np.zeros(self.morgan_nbits, dtype=np.float32)
         try:
-            fp = rdMolDescriptors.GetMorganFingerprintAsBitVect(
-                mol, radius=self.morgan_radius, nBits=self.morgan_nbits
-            )
+            if self._generator is not None:
+                fp = self._generator.GetFingerprint(mol)
+            else:
+                fp = rdMolDescriptors.GetMorganFingerprintAsBitVect(
+                    mol, radius=self.morgan_radius, nBits=self.morgan_nbits
+                )
             arr = np.zeros((1,), dtype=np.int8)
             Chem.DataStructs.ConvertToNumpyArray(fp, arr)
             return arr.astype(np.float32)
