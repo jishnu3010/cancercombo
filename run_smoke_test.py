@@ -1,6 +1,7 @@
 import os
 import sys
 import torch
+import numpy as np
 import pandas as pd
 from dataset import load_nci60_gex, parse_dataframe_to_records, DrugComboDataset
 from torch.utils.data import DataLoader
@@ -145,8 +146,8 @@ def run_smoke_test():
             test_preds.append(p.numpy())
             test_trues.append(test_batch["viability"].numpy())
             
-    test_preds = torch.tensor(test_preds[0])
-    test_trues = torch.tensor(test_trues[0])
+    test_preds = torch.tensor(np.concatenate(test_preds, axis=0))
+    test_trues = torch.tensor(np.concatenate(test_trues, axis=0))
     
     assert not torch.isnan(test_preds).any(), "NaN found in test predictions!"
     assert not torch.isinf(test_preds).any(), "Inf found in test predictions!"
