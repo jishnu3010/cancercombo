@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 from typing import Dict, Any, Optional
 
 try:
-    import pytorch_lightning as pl
+    import pytorch_lightning as pl  # type: ignore # pyrefly: ignore [missing-import]
 except ImportError:
     pl = None
 

@@ -2,8 +2,8 @@ import os
 import torch
 from torch.utils.data import DataLoader
 try:
-    import pytorch_lightning as pl
-    from pytorch_lightning.callbacks import ModelCheckpoint
+    import pytorch_lightning as pl  # type: ignore # pyrefly: ignore [missing-import]
+    from pytorch_lightning.callbacks import ModelCheckpoint  # type: ignore # pyrefly: ignore [missing-import]
 except ImportError:
     pl = None
     class ModelCheckpoint:

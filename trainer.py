@@ -1,6 +1,6 @@
 import torch
 try:
-    import pytorch_lightning as pl
+    import pytorch_lightning as pl  # type: ignore # pyrefly: ignore [missing-import]
 except ImportError:
     import torch.nn as _nn
     class _DummyPLModule(_nn.Module):
