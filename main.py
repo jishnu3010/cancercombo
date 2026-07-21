@@ -67,13 +67,20 @@ def main():
         default="config.yaml",
         help="Path to YAML configuration file"
     )
+    parser.add_argument(
+        "--scenario",
+        type=int,
+        default=1,
+        choices=[1, 2, 3],
+        help="Scenario split number: 1 (combination-wise), 2 (cell-wise), or 3 (drug-wise) (default: 1)"
+    )
     
     args = parser.parse_args()
     
     if args.mode == "train":
-        run_training(args.config)
+        run_training(config_path=args.config, scenario=args.scenario)
     elif args.mode == "evaluate":
-        run_evaluation(args.checkpoint, args.config)
+        run_evaluation(checkpoint_path=args.checkpoint, config_path=args.config, scenario=args.scenario)
     elif args.mode == "predict":
         run_prediction_cli(args.checkpoint)
     else:

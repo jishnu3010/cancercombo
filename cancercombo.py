@@ -25,6 +25,7 @@ class CancerCombo(nn.Module):
         self.molformer_enc = MolFormerEncoder(
             model_name=config.molformer_model_name,
             d_model=config.d_model,
+            molformer_in_dim=config.molformer_in_dim,
             use_pretrained=config.use_pretrained_molformer
         )
         self.morgan_enc = MorganEncoder(

@@ -370,7 +370,7 @@ class DrugComboDataset(Dataset):
             morgan_b, desc_b, ids_b, mask_b = self._dynamic_cache[smiles_b]
         
         # Get biological profile
-        norm_cell = cell_name.replace('-', '_').replace('/', '_').upper()
+        norm_cell = re.sub(r'[^A-Z0-9]', '', str(cell_name).upper())
         cell_vec = self.cell_line_features.get(cell_name, self.cell_line_features.get(norm_cell))
         if cell_vec is None:
             raise KeyError(f"Cell line features for '{cell_name}' not found. Do not zero-pad.")

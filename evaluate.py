@@ -117,7 +117,10 @@ def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", c
     
     logger.info(f"Loading checkpoint: {checkpoint_path}")
     if not os.path.exists(checkpoint_path):
-        logger.error(f"Checkpoint path not found: {checkpoint_path}")
+        logger.error(
+            f"Checkpoint path not found: '{checkpoint_path}'. "
+            "Please train a model first using 'python main.py --mode train' or specify a valid checkpoint path using '--checkpoint'."
+        )
         return
         
     model = CancerCombo(m_config)
