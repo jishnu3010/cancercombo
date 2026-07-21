@@ -11,7 +11,7 @@ except ImportError:
 
 from typing import Optional
 from config import load_config
-from dataset import DrugComboDataset, load_nci60_gex, load_synergy_dataset
+from dataset import DrugComboDataset, load_nci60_gex, load_synergy_dataset, load_precomputed_drug_features
 from trainer import CancerComboLightningModule
 from cancercombo import CancerCombo
 from losses import CancerComboLoss
@@ -37,6 +37,13 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
     logger.info("Attempting to load real dataset archives...")
     real_gex = load_nci60_gex("data/features/NCI-60_landmark_gex.csv", target_dim=m_config.cell_in_dim)
     real_data = load_synergy_dataset("data/DrugCombination_with_SMILES.zip")
+    drug_features = load_precomputed_drug_features("data/features/drug_features.pt")
+    if not drug_features:
+        drug_features = load_precomputed_drug_features("data/features/drug_features.pkl")
+    if drug_features:
+        logger.info(f"Loaded precomputed drug features for {len(drug_features)} SMILES strings.")
+    else:
+        logger.info("No precomputed drug feature store found. Falling back to on-the-fly preprocessing.")
     
     if max_samples is not None and real_data and len(real_data) > max_samples:
         real_data = real_data[:max_samples]
@@ -53,8 +60,8 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
         train_data, cell_features = generate_mock_data(64)
         val_data, _ = generate_mock_data(16)
     
-    train_dataset = DrugComboDataset(train_data, cell_features)
-    val_dataset = DrugComboDataset(val_data, cell_features)
+    train_dataset = DrugComboDataset(train_data, cell_features, drug_feature_store=drug_features)
+    val_dataset = DrugComboDataset(val_data, cell_features, drug_feature_store=drug_features)
     
     num_workers = getattr(t_config, "num_workers", 0)
     pin_mem = torch.cuda.is_available()

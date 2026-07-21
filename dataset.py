@@ -2,6 +2,7 @@ import os
 import re
 import json
 import zipfile
+import pickle
 import torch
 from torch.utils.data import Dataset
 import numpy as np
@@ -97,8 +98,11 @@ def load_synergy_dataset(zip_or_csv_path: str = "data/DrugCombination_with_SMILE
                 csv_files = [f for f in z.namelist() if f.endswith('.csv')]
                 if not csv_files:
                     return []
-                with z.open(csv_files[0]) as f:
-                    df = pd.read_csv(f)
+                dfs = []
+                for csv_file in csv_files:
+                    with z.open(csv_file) as f:
+                        dfs.append(pd.read_csv(f))
+                df = pd.concat(dfs, ignore_index=True)
         else:
             df = pd.read_csv(zip_or_csv_path)
             
@@ -108,12 +112,12 @@ def load_synergy_dataset(zip_or_csv_path: str = "data/DrugCombination_with_SMILE
         default_d_b = [0.0, 0.2, 2.0, 20.0]
         
         for row in records:
-            s_a = row.get('smiles_a', row.get('smiles1', row.get('SMILES_A', '')))
-            s_b = row.get('smiles_b', row.get('smiles2', row.get('SMILES_B', '')))
-            cell = row.get('cell_line_name', row.get('cell', row.get('CELL_NAME', 'MCF7')))
+            s_a = row.get('Drug1_SMILES', row.get('smiles_a', row.get('smiles1', row.get('SMILES_A', ''))))
+            s_b = row.get('Drug2_SMILES', row.get('smiles_b', row.get('smiles2', row.get('SMILES_B', ''))))
+            cell = row.get('Sample', row.get('cell_line_name', row.get('cell', row.get('CELL_NAME', 'MCF7'))))
             
-            d_a = row.get('doses_a', default_d_a)
-            d_b = row.get('doses_b', default_d_b)
+            d_a = row.get('Drug1_Dose', row.get('doses_a', default_d_a))
+            d_b = row.get('Drug2_Dose', row.get('doses_b', default_d_b))
             if isinstance(d_a, str):
                 try: d_a = json.loads(d_a)
                 except Exception: d_a = default_d_a
@@ -121,7 +125,7 @@ def load_synergy_dataset(zip_or_csv_path: str = "data/DrugCombination_with_SMILE
                 try: d_b = json.loads(d_b)
                 except Exception: d_b = default_d_b
                 
-            viab = row.get('viability_matrix', None)
+            viab = row.get('Response', row.get('viability_matrix', None))
             if isinstance(viab, str):
                 try: viab = json.loads(viab)
                 except Exception: viab = np.zeros((len(d_a), len(d_b))).tolist()
@@ -148,6 +152,7 @@ class DrugComboDataset(Dataset):
         self,
         data_list: List[Dict[str, Any]],
         cell_line_features: Dict[str, np.ndarray],
+        drug_feature_store: Dict[str, Dict[str, Any]] | None = None,
         max_smiles_len: int = 128
     ):
         """
@@ -158,6 +163,7 @@ class DrugComboDataset(Dataset):
         """
         self.data = data_list
         self.cell_line_features = cell_line_features
+        self.drug_feature_store = drug_feature_store or {}
         self.tokenizer = SMILESTokenizer(max_len=max_smiles_len)
         self.preprocessor = MolecularPreprocessor()
         
@@ -173,12 +179,27 @@ class DrugComboDataset(Dataset):
         doses_b = np.array(item['doses_b'], dtype=np.float32)
         viability = np.array(item['viability_matrix'], dtype=np.float32)
         
-        # Calculate chemical representations
-        morgan_a, desc_a, _ = self.preprocessor.process_smiles(smiles_a)
-        morgan_b, desc_b, _ = self.preprocessor.process_smiles(smiles_b)
-        
-        ids_a, mask_a = self.tokenizer.tokenize(smiles_a)
-        ids_b, mask_b = self.tokenizer.tokenize(smiles_b)
+        # Calculate or retrieve chemical representations
+        feat_a = self.drug_feature_store.get(smiles_a)
+        feat_b = self.drug_feature_store.get(smiles_b)
+
+        if feat_a is not None:
+            morgan_a = feat_a["morgan"] if isinstance(feat_a, dict) else feat_a[0]
+            desc_a = feat_a["descriptors"] if isinstance(feat_a, dict) else feat_a[1]
+            ids_a = feat_a["token_ids"] if isinstance(feat_a, dict) else feat_a[2]
+            mask_a = feat_a["token_mask"] if isinstance(feat_a, dict) else feat_a[3]
+        else:
+            morgan_a, desc_a, _ = self.preprocessor.process_smiles(smiles_a)
+            ids_a, mask_a = self.tokenizer.tokenize(smiles_a)
+
+        if feat_b is not None:
+            morgan_b = feat_b["morgan"] if isinstance(feat_b, dict) else feat_b[0]
+            desc_b = feat_b["descriptors"] if isinstance(feat_b, dict) else feat_b[1]
+            ids_b = feat_b["token_ids"] if isinstance(feat_b, dict) else feat_b[2]
+            mask_b = feat_b["token_mask"] if isinstance(feat_b, dict) else feat_b[3]
+        else:
+            morgan_b, desc_b, _ = self.preprocessor.process_smiles(smiles_b)
+            ids_b, mask_b = self.tokenizer.tokenize(smiles_b)
         
         # Get biological profile
         norm_cell = cell_name.replace('-', '_').replace('/', '_').upper()
@@ -209,4 +230,21 @@ class DrugComboDataset(Dataset):
                 res_dict[p] = torch.tensor([float(item[p])], dtype=torch.float32)
                 
         return res_dict
+
+
+def load_precomputed_drug_features(feature_path: str) -> Dict[str, Dict[str, Any]]:
+    """Load a saved drug feature store from .pt or .pkl."""
+    if not os.path.exists(feature_path):
+        return {}
+
+    try:
+        if feature_path.endswith(".pt"):
+            return torch.load(feature_path, map_location="cpu")
+        if feature_path.endswith(".pkl"):
+            with open(feature_path, "rb") as f:
+                return pickle.load(f)
+    except Exception:
+        return {}
+
+    return {}
 

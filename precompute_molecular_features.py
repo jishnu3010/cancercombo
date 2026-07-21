@@ -52,8 +52,11 @@ def extract_unique_smiles(input_path: str) -> List[str]:
             csv_files = [f for f in z.namelist() if f.endswith(".csv")]
             if not csv_files:
                 raise ValueError("No CSV found in ZIP archive.")
-            with z.open(csv_files[0]) as f:
-                df = pd.read_csv(f)
+            dfs = []
+            for csv_file in csv_files:
+                with z.open(csv_file) as f:
+                    dfs.append(pd.read_csv(f))
+            df = pd.concat(dfs, ignore_index=True)
     else:
         df = pd.read_csv(input_path)
         

@@ -97,7 +97,10 @@ def get_canonical_combos(df: pd.DataFrame, drug1_col: str, drug2_col: str) -> Li
     """
     d1_vals = df[drug1_col].astype(str).str.strip().values
     d2_vals = df[drug2_col].astype(str).str.strip().values
-    return [(a, b) if a <= b else (b, a) for a, b in zip(d1_vals, d2_vals)]
+    mask = d1_vals <= d2_vals
+    first = np.where(mask, d1_vals, d2_vals)
+    second = np.where(mask, d2_vals, d1_vals)
+    return list(zip(first, second))
 
 
 # =====================================================================
@@ -349,26 +352,28 @@ def drug_split(
     
     # 4. Vectorized fast categorization according to benchmark evaluation protocol
     n_samples = len(df)
-    assigned_splits = np.full(n_samples, -1, dtype=int)
     
-    for i in range(n_samples):
-        d1, d2 = d1_vals[i], d2_vals[i]
-        
-        d1_is_train, d2_is_train = (d1 in train_drugs), (d2 in train_drugs)
-        d1_is_val, d2_is_val = (d1 in val_drugs), (d2 in val_drugs)
-        d1_is_test, d2_is_test = (d1 in test_drugs), (d2 in test_drugs)
-        
-        # Rule 1: Train sample -> BOTH drugs must be in TrainDrugs
-        if d1_is_train and d2_is_train:
-            assigned_splits[i] = 1
-            
-        # Rule 2: Test sample -> At least one drug is in TestDrugs, and NEITHER drug is in ValDrugs
-        elif (d1_is_test or d2_is_test) and not (d1_is_val or d2_is_val):
-            assigned_splits[i] = 3
-            
-        # Rule 3: Validation sample -> At least one drug is in ValDrugs, and NEITHER drug is in TestDrugs
-        elif (d1_is_val or d2_is_val) and not (d1_is_test or d2_is_test):
-            assigned_splits[i] = 2
+    train_drugs_arr = np.array(list(train_drugs))
+    val_drugs_arr = np.array(list(val_drugs))
+    test_drugs_arr = np.array(list(test_drugs))
+    
+    d1_is_train = np.isin(d1_vals, train_drugs_arr)
+    d2_is_train = np.isin(d2_vals, train_drugs_arr)
+    
+    d1_is_val = np.isin(d1_vals, val_drugs_arr)
+    d2_is_val = np.isin(d2_vals, val_drugs_arr)
+    
+    d1_is_test = np.isin(d1_vals, test_drugs_arr)
+    d2_is_test = np.isin(d2_vals, test_drugs_arr)
+    
+    train_mask = d1_is_train & d2_is_train
+    test_mask = (d1_is_test | d2_is_test) & ~(d1_is_val | d2_is_val)
+    val_mask = (d1_is_val | d2_is_val) & ~(d1_is_test | d2_is_test)
+    
+    assigned_splits = np.full(n_samples, -1, dtype=int)
+    assigned_splits[train_mask] = 1
+    assigned_splits[val_mask] = 2
+    assigned_splits[test_mask] = 3
             
     out_df = df.copy()
     out_df["split"] = assigned_splits
@@ -430,25 +435,23 @@ def validate_drug_split(
     val_df = df[df["split"] == 2]
     test_df = df[df["split"] == 3]
     
-    train_d1 = train_df[drug1_col].astype(str).str.strip().values
-    train_d2 = train_df[drug2_col].astype(str).str.strip().values
-    for d1, d2 in zip(train_d1, train_d2):
-        if d1 in val_drugs or d1 in test_drugs or d2 in val_drugs or d2 in test_drugs:
-            raise ValueError(f"Drug leakage in Train row ({d1}, {d2}): contains non-train drug!")
+    train_d1 = train_df[drug1_col].astype(str).str.strip()
+    train_d2 = train_df[drug2_col].astype(str).str.strip()
+    if train_d1.isin(val_drugs).any() or train_d1.isin(test_drugs).any() or \
+       train_d2.isin(val_drugs).any() or train_d2.isin(test_drugs).any():
+        raise ValueError("Drug leakage in Train row: contains non-train drug!")
             
-    val_d1 = val_df[drug1_col].astype(str).str.strip().values
-    val_d2 = val_df[drug2_col].astype(str).str.strip().values
-    for d1, d2 in zip(val_d1, val_d2):
-        if d1 in test_drugs or d2 in test_drugs:
-            raise ValueError(f"Test drug leakage in Validation row ({d1}, {d2})!")
-        if d1 not in val_drugs and d2 not in val_drugs:
-            raise ValueError(f"Validation row ({d1}, {d2}) missing unseen validation drug!")
+    val_d1 = val_df[drug1_col].astype(str).str.strip()
+    val_d2 = val_df[drug2_col].astype(str).str.strip()
+    if val_d1.isin(test_drugs).any() or val_d2.isin(test_drugs).any():
+        raise ValueError("Test drug leakage in Validation row!")
+    if not (val_d1.isin(val_drugs) | val_d2.isin(val_drugs)).all():
+        raise ValueError("Validation row missing unseen validation drug!")
 
-    test_d1 = test_df[drug1_col].astype(str).str.strip().values
-    test_d2 = test_df[drug2_col].astype(str).str.strip().values
-    for d1, d2 in zip(test_d1, test_d2):
-        if d1 not in test_drugs and d2 not in test_drugs:
-            raise ValueError(f"Test row ({d1}, {d2}) missing unseen test drug!")
+    test_d1 = test_df[drug1_col].astype(str).str.strip()
+    test_d2 = test_df[drug2_col].astype(str).str.strip()
+    if not (test_d1.isin(test_drugs) | test_d2.isin(test_drugs)).all():
+        raise ValueError("Test row missing unseen test drug!")
             
     logger.info("[PASSED] Drug leakage = 0")
     return True
@@ -574,8 +577,11 @@ def main():
             csv_names = [f for f in z.namelist() if f.endswith(".csv")]
             if not csv_names:
                 raise ValueError(f"No CSV file found inside ZIP archive '{args.input_csv}'.")
-            with z.open(csv_names[0]) as f:
-                df = pd.read_csv(f)
+            dfs = []
+            for csv_name in csv_names:
+                with z.open(csv_name) as f:
+                    dfs.append(pd.read_csv(f))
+            df = pd.concat(dfs, ignore_index=True)
     else:
         logger.info(f"Loading CSV dataset: '{args.input_csv}'...")
         df = pd.read_csv(args.input_csv)

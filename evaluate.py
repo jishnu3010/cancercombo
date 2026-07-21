@@ -1,10 +1,10 @@
 import os
 import torch
+import pandas as pd
 from torch.utils.data import DataLoader
 from config import load_config
-from dataset import DrugComboDataset
+from dataset import DrugComboDataset, load_nci60_gex
 from cancercombo import CancerCombo
-from helpers import generate_mock_data
 from logger import setup_logger
 from metrics import calculate_metrics
 import numpy as np
@@ -71,14 +71,37 @@ def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", c
         config_path: Path to configuration YAML.
     """
     logger = setup_logger("CancerCombo Eval")
-    logger.info("Setting up configs and mock evaluation dataset...")
+    logger.info("Setting up configs and real held-out evaluation dataset...")
     
     m_config, _ = load_config(config_path)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    logger.info("Generating evaluation dataset...")
-    test_data, cell_features = generate_mock_data(32)
-    test_dataset = DrugComboDataset(test_data, cell_features)
+    split_path = "data/splits/scenario1_combination.csv"
+    if not os.path.exists(split_path):
+        logger.error(
+            f"Held-out split file not found: {split_path}. "
+            "Run split_dataset.py first and save the scenario-1 split there."
+        )
+        return
+
+    logger.info(f"Loading held-out test split from {split_path}...")
+    split_df = pd.read_csv(split_path)
+    if "split" not in split_df.columns:
+        logger.error(f"Split file does not contain a 'split' column: {split_path}")
+        return
+
+    test_df = split_df[split_df["split"] == 3].copy()
+    if test_df.empty:
+        logger.error(f"No held-out test rows found in {split_path} (split == 3).")
+        return
+
+    cell_features = load_nci60_gex("data/features/NCI-60_landmark_gex.csv", target_dim=m_config.cell_in_dim)
+    if not cell_features:
+        logger.error("Cell feature file not found or unreadable: data/features/NCI-60_landmark_gex.csv")
+        return
+
+    test_records = test_df.to_dict("records")
+    test_dataset = DrugComboDataset(test_records, cell_features)
     test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
     
     logger.info(f"Loading checkpoint: {checkpoint_path}")
