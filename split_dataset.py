@@ -71,7 +71,7 @@ def detect_columns(
     if cell_col and cell_col in cols:
         c_col = cell_col
     else:
-        c_candidates = ["cell", "Sample", "cell_line_name", "CELL_NAME", "cell_line", "Cell", "cell_name"]
+        c_candidates = ["cell", "cell_line_name", "CELL_NAME", "cell_line", "Cell", "cell_name"]
         c_col = next((c for c in c_candidates if c in cols), None)
 
     if not d1 or not d2 or not c_col:

@@ -87,8 +87,8 @@ def load_nci60_gex(csv_path: str = "data/features/NCI-60_landmark_gex.csv", targ
         return {}
 
 
-def match_cell_line(sample_str: str, known_cells_map: Dict[str, str]) -> Optional[str]:
-    """Robustly extract cell line name from a complex Sample string and return canonical name.
+def resolve_cell_line(sample_str: str, known_cells_map: Dict[str, str]) -> Optional[str]:
+    """Robustly extract biological cell line name from a complex Sample string and return canonical name.
     
     Args:
         sample_str: The full sample string (e.g., 'DrugA_DrugB_786-0', 'DrugA_DrugB_A549/ATCC', 'DrugA_DrugB_HL-60(TB)')
@@ -97,33 +97,28 @@ def match_cell_line(sample_str: str, known_cells_map: Dict[str, str]) -> Optiona
     Returns:
         Optional[str]: The canonical cell line name if matched, else None.
     """
+    if not isinstance(sample_str, str) or not sample_str.strip():
+        return None
     s_clean = re.sub(r'\(.*?\)', '', str(sample_str)).strip()
     
-    # 1. Try right-to-left underscore splitting
-    parts = s_clean.split('_')
-    for i in range(len(parts)):
-        candidate = '_'.join(parts[i:])
-        norm_cand = re.sub(r'[^A-Z0-9]', '', candidate.upper())
-        if norm_cand in known_cells_map:
-            return known_cells_map[norm_cand]
-            
-    # 2. Try handling provider slash suffixes (e.g. A549/ATCC -> A549)
+    # Protect NCI/ADR-RES while handling provider slash suffixes (e.g. A549/ATCC -> A549)
     if '/' in s_clean and 'NCI/ADR' not in s_clean.upper():
-        no_slash = s_clean.split('/')[0]
-        parts_ns = no_slash.split('_')
-        for i in range(len(parts_ns)):
-            candidate = '_'.join(parts_ns[i:])
-            norm_cand = re.sub(r'[^A-Z0-9]', '', candidate.upper())
-            if norm_cand in known_cells_map:
-                return known_cells_map[norm_cand]
-                
-    # 3. Substring / suffix ending check on normalized full string
-    norm_full = re.sub(r'[^A-Z0-9]', '', s_clean.upper())
-    for norm_k, canonical_name in known_cells_map.items():
-        if norm_full.endswith(norm_k):
-            return canonical_name
+        s_clean = s_clean.split('/')[0].strip()
+        
+    norm_sample = re.sub(r'[^A-Z0-9]', '', s_clean.upper())
+    
+    # Sort normalized keys by length descending to match longest cell line name first (preventing prefix collision)
+    sorted_keys = sorted(known_cells_map.keys(), key=len, reverse=True)
+    for norm_k in sorted_keys:
+        if norm_sample.endswith(norm_k):
+            return known_cells_map[norm_k]
             
     return None
+
+
+def match_cell_line(sample_str: str, known_cells_map: Dict[str, str]) -> Optional[str]:
+    """Alias to resolve_cell_line for backward compatibility."""
+    return resolve_cell_line(sample_str, known_cells_map)
 
 
 def parse_dataframe_to_records(df: pd.DataFrame, known_gex_dict: Dict[str, np.ndarray] = None) -> List[Dict[str, Any]]:
@@ -227,35 +222,62 @@ def parse_dataframe_to_records(df: pd.DataFrame, known_gex_dict: Dict[str, np.nd
     s_a_col = 'Drug1_SMILES' if 'Drug1_SMILES' in first_rows_valid.columns else 'Drug1'
     s_b_col = 'Drug2_SMILES' if 'Drug2_SMILES' in first_rows_valid.columns else 'Drug2'
     
-    responses_all = df_valid['Response'].values.astype(np.float32).reshape(-1, 4, 4)
-    doses_a_all = df_valid.groupby('Sample', sort=False)['Drug1_Dose'].unique()
-    doses_b_all = df_valid.groupby('Sample', sort=False)['Drug2_Dose'].unique()
-
+    # Verify 4x4 dose grid and build explicit Cartesian coordinate response matrix per sample
+    grouped = df_valid.groupby('Sample', sort=False)
     data_list = []
-    sample_idx = 0
     
-    for _, row in first_rows_valid.iterrows():
-        sample_name = row['Sample']
-        s_a = str(row[s_a_col])
-        s_b = str(row[s_b_col])
+    for sample_name, sample_df in grouped:
+        if sample_name not in sample_to_cell:
+            continue
+        cell = sample_to_cell[sample_name]
+        
+        row_first = sample_df.iloc[0]
+        s_a = str(row_first[s_a_col])
+        s_b = str(row_first[s_b_col])
         if pd.isna(s_a) or pd.isna(s_b) or not s_a.strip() or not s_b.strip():
-            sample_idx += 1
             continue
             
-        cell = sample_to_cell[sample_name]
-        d_a = np.sort(doses_a_all[sample_name]).tolist()
-        d_b = np.sort(doses_b_all[sample_name]).tolist()
-        viab = responses_all[sample_idx].tolist()
+        d1_doses = np.sort(sample_df['Drug1_Dose'].unique())
+        d2_doses = np.sort(sample_df['Drug2_Dose'].unique())
         
+        if len(d1_doses) != 4 or len(d2_doses) != 4:
+            continue
+            
+        coord_map = {}
+        valid_grid = True
+        for da_val, db_val, resp_val in zip(sample_df['Drug1_Dose'].values, sample_df['Drug2_Dose'].values, sample_df['Response'].values):
+            da_f, db_f, resp_f = float(da_val), float(db_val), float(resp_val)
+            if np.isnan(resp_f) or np.isinf(resp_f):
+                valid_grid = False
+                break
+            coord_map[(da_f, db_f)] = resp_f
+            
+        if not valid_grid or len(coord_map) != 16:
+            continue
+            
+        matrix = np.zeros((4, 4), dtype=np.float32)
+        complete = True
+        for i, da in enumerate(d1_doses):
+            for j, db in enumerate(d2_doses):
+                coord_key = (float(da), float(db))
+                if coord_key not in coord_map:
+                    complete = False
+                    break
+                matrix[i, j] = coord_map[coord_key]
+            if not complete:
+                break
+                
+        if not complete:
+            continue
+            
         data_list.append({
             "smiles_a": s_a,
             "smiles_b": s_b,
             "cell_line_name": cell,
-            "doses_a": d_a,
-            "doses_b": d_b,
-            "viability_matrix": viab
+            "doses_a": d1_doses.tolist(),
+            "doses_b": d2_doses.tolist(),
+            "viability_matrix": matrix.tolist()
         })
-        sample_idx += 1
 
     if known_cells_map:
         total_samples = len(first_rows)
