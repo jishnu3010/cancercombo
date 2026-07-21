@@ -27,6 +27,9 @@ class CancerComboPredictionHeads(nn.Module):
         # Combination & interaction heads (evaluated over symmetric combination representation z_combo)
         self.head_e3 = self._build_head(d_model, d_ff)
         self.head_alpha = self._build_head(d_model, d_ff)
+
+        # Learned post-head bias applied to the eight raw parameter predictions.
+        self.output_bias = nn.Parameter(torch.zeros(8))
         
     def _build_head(self, d_model: int, d_ff: int) -> nn.Sequential:
         return nn.Sequential(
@@ -65,6 +68,15 @@ class CancerComboPredictionHeads(nn.Module):
         # Combination parameter predictions (z_combo -> interaction params)
         raw_e3 = self.head_e3(z_combo)
         raw_alpha = self.head_alpha(z_combo)
+
+        raw_e1 = raw_e1 + self.output_bias[0]
+        raw_e2 = raw_e2 + self.output_bias[1]
+        raw_e3 = raw_e3 + self.output_bias[2]
+        raw_log_c1 = raw_log_c1 + self.output_bias[3]
+        raw_log_c2 = raw_log_c2 + self.output_bias[4]
+        raw_h1 = raw_h1 + self.output_bias[5]
+        raw_h2 = raw_h2 + self.output_bias[6]
+        raw_alpha = raw_alpha + self.output_bias[7]
         
         # Sigmoid scaling maps to physiological ranges
         e1 = self.config.e_min + (self.config.e_max - self.config.e_min) * torch.sigmoid(raw_e1)
