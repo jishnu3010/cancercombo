@@ -121,14 +121,21 @@ def load_synergy_dataset(zip_or_csv_path: str = "data/DrugCombination_with_SMILE
             if isinstance(d_a, str):
                 try: d_a = json.loads(d_a)
                 except Exception: d_a = default_d_a
+            elif isinstance(d_a, (int, float)):
+                d_a = [d_a]
+                
             if isinstance(d_b, str):
                 try: d_b = json.loads(d_b)
                 except Exception: d_b = default_d_b
+            elif isinstance(d_b, (int, float)):
+                d_b = [d_b]
                 
             viab = row.get('Response', row.get('viability_matrix', None))
             if isinstance(viab, str):
                 try: viab = json.loads(viab)
                 except Exception: viab = np.zeros((len(d_a), len(d_b))).tolist()
+            elif isinstance(viab, (int, float)):
+                viab = [[viab]]
             elif viab is None:
                 viab = np.zeros((len(d_a), len(d_b))).tolist()
                 
