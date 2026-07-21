@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 import numpy as np
 import pandas as pd
 from preprocessor import MolecularPreprocessor
-from typing import List, Dict, Tuple, Any
+from typing import List, Dict, Tuple, Any, Optional
 
 SMILES_REGEX = r"(\[[^\]]+\]|Br|Cl|Si|Se|B|C|N|O|P|S|F|I|b|c|n|o|p|s|==|#|%[0-9]{2}|[0-9]|\+|-|=|/|\\|\@|\.|\(|\)|~|\*)"
 
@@ -65,123 +65,196 @@ def load_nci60_gex(csv_path: str = "data/features/NCI-60_landmark_gex.csv", targ
         return {}
     try:
         df = pd.read_csv(csv_path)
+        # First column is gene names, remaining columns are canonical cell line names
         cell_lines = df.columns[1:]
         gex_dict = {}
         for cell in cell_lines:
             vec = df[cell].values.astype(np.float32)
             if target_dim and len(vec) != target_dim:
-                # We do not blindly zero-pad anymore
-                pass
-            norm_key = cell.replace('-', '_').replace('/', '_').upper()
+                raise ValueError(f"Gene expression vector for {cell} has dimension {len(vec)}, expected {target_dim}")
+            
+            # Map canonical name and normalized name
             gex_dict[cell] = vec
+            norm_key = re.sub(r'[^A-Z0-9]', '', str(cell).upper())
             gex_dict[norm_key] = vec
         return gex_dict
     except Exception as e:
         print(f"Error loading gene expression: {e}")
         return {}
 
-def match_cell_line(sample_str: str, known_cells: set) -> str:
-    """Robustly extract cell line name from a complex Sample string by matching ending.
+
+def match_cell_line(sample_str: str, known_cells_map: Dict[str, str]) -> Optional[str]:
+    """Robustly extract cell line name from a complex Sample string and return canonical name.
     
     Args:
-        sample_str: The full sample string (e.g., 'DrugA_DrugB_786-0')
-        known_cells: Set of known normalized cell line names.
+        sample_str: The full sample string (e.g., 'DrugA_DrugB_786-0', 'DrugA_DrugB_A549/ATCC', 'DrugA_DrugB_HL-60(TB)')
+        known_cells_map: Mapping from normalized cell line string to canonical cell line name.
         
     Returns:
-        str: The normalized matched cell line name, or the original if unmatched.
+        Optional[str]: The canonical cell line name if matched, else None.
     """
-    parts = sample_str.split('_')
+    s_clean = re.sub(r'\(.*?\)', '', str(sample_str)).strip()
+    
+    # 1. Try right-to-left underscore splitting
+    parts = s_clean.split('_')
     for i in range(len(parts)):
-        candidate = "_".join(parts[i:])
-        norm_candidate = candidate.replace('-', '_').replace('/', '_').upper()
-        if norm_candidate in known_cells:
-            return norm_candidate
+        candidate = '_'.join(parts[i:])
+        norm_cand = re.sub(r'[^A-Z0-9]', '', candidate.upper())
+        if norm_cand in known_cells_map:
+            return known_cells_map[norm_cand]
             
-    # Try exact match if simple splitting fails
-    norm_sample = sample_str.replace('-', '_').replace('/', '_').upper()
-    if norm_sample in known_cells:
-        return norm_sample
-        
-    return sample_str
+    # 2. Try handling provider slash suffixes (e.g. A549/ATCC -> A549)
+    if '/' in s_clean and 'NCI/ADR' not in s_clean.upper():
+        no_slash = s_clean.split('/')[0]
+        parts_ns = no_slash.split('_')
+        for i in range(len(parts_ns)):
+            candidate = '_'.join(parts_ns[i:])
+            norm_cand = re.sub(r'[^A-Z0-9]', '', candidate.upper())
+            if norm_cand in known_cells_map:
+                return known_cells_map[norm_cand]
+                
+    # 3. Substring / suffix ending check on normalized full string
+    norm_full = re.sub(r'[^A-Z0-9]', '', s_clean.upper())
+    for norm_k, canonical_name in known_cells_map.items():
+        if norm_full.endswith(norm_k):
+            return canonical_name
+            
+    return None
 
 
-def parse_dataframe_to_records(df: pd.DataFrame, known_cells: set = None) -> List[Dict[str, Any]]:
-    """Parse pandas DataFrame into a list of DrugComboDataset compatible dictionaries.
+def parse_dataframe_to_records(df: pd.DataFrame, known_gex_dict: Dict[str, np.ndarray] = None) -> List[Dict[str, Any]]:
+    """Parse pandas DataFrame into a list of 2D dose-response matrix records grouped by Sample.
     
     Args:
         df: Input dataframe containing drug and dose-response data.
-        known_cells: Optional set of known cell lines for robust extraction.
+        known_gex_dict: Dictionary mapping cell lines to gene expression vectors.
         
     Returns:
-        List[Dict]: List of parsed records.
+        List[Dict]: List of parsed sample records containing 4x4 viability matrices.
     """
-    records = df.to_dict('records')
+    if df.empty:
+        return []
+        
+    # Build normalized lookup for cell matching
+    known_cells_map = {}
+    if known_gex_dict:
+        for k in known_gex_dict.keys():
+            norm_k = re.sub(r'[^A-Z0-9]', '', str(k).upper())
+            known_cells_map[norm_k] = k
+
+    # First check if the dataframe is already pre-grouped records (e.g., has doses_a as list or matrix)
+    if 'viability_matrix' in df.columns or 'doses_a' in df.columns:
+        # Pre-grouped or pre-processed rows
+        records = df.to_dict('records')
+        data_list = []
+        for row in records:
+            s_a = row.get('smiles_a', row.get('Drug1_SMILES', ''))
+            s_b = row.get('smiles_b', row.get('Drug2_SMILES', ''))
+            cell_raw = str(row.get('cell_line_name', row.get('Sample', '')))
+            
+            if pd.isna(s_a) or pd.isna(s_b) or not str(s_a).strip() or not str(s_b).strip():
+                continue
+                
+            cell = match_cell_line(cell_raw, known_cells_map) if known_cells_map else cell_raw
+            if known_cells_map and (cell is None or cell not in known_gex_dict):
+                continue
+                
+            d_a = row.get('doses_a')
+            d_b = row.get('doses_b')
+            viab = row.get('viability_matrix', row.get('viability'))
+            
+            if isinstance(d_a, str):
+                try: d_a = json.loads(d_a)
+                except Exception: continue
+            if isinstance(d_b, str):
+                try: d_b = json.loads(d_b)
+                except Exception: continue
+            if isinstance(viab, str):
+                try: viab = json.loads(viab)
+                except Exception: continue
+                
+            data_list.append({
+                "smiles_a": str(s_a),
+                "smiles_b": str(s_b),
+                "cell_line_name": str(cell),
+                "doses_a": d_a,
+                "doses_b": d_b,
+                "viability_matrix": viab
+            })
+        return data_list
+
+    # Otherwise, group raw 16-row per Sample dataframe into 2D dose-response matrix surfaces
+    grouped = df.groupby('Sample', sort=False)
     data_list = []
-    default_d_a = [0.0, 0.1, 1.0, 10.0]
-    default_d_b = [0.0, 0.2, 2.0, 20.0]
     
     matched_count = 0
     unmatched_count = 0
     unique_cells = set()
     unmatched_names = set()
     
-    for row in records:
-        s_a = row.get('Drug1_SMILES', row.get('smiles_a', row.get('smiles1', row.get('SMILES_A', ''))))
-        s_b = row.get('Drug2_SMILES', row.get('smiles_b', row.get('smiles2', row.get('SMILES_B', ''))))
-        cell_raw = str(row.get('Sample', row.get('cell_line_name', row.get('cell', row.get('CELL_NAME', 'MCF7')))))
-        
-        if known_cells:
-            cell = match_cell_line(cell_raw, known_cells)
-            if cell in known_cells:
-                matched_count += 1
-                unique_cells.add(cell)
-            else:
+    for sample_name, group in grouped:
+        # Check cell line matching
+        if known_cells_map:
+            cell = match_cell_line(sample_name, known_cells_map)
+            if cell is None or cell not in known_gex_dict:
                 unmatched_count += 1
-                unmatched_names.add(cell_raw)
-                continue # Skip unmatched cells to avoid silently returning zeros
+                unmatched_names.add(sample_name)
+                continue
+            matched_count += 1
+            unique_cells.add(cell)
         else:
-            cell = cell_raw
+            cell = str(sample_name)
+
+        # Get drug SMILES
+        s_a = group['Drug1_SMILES'].iloc[0] if 'Drug1_SMILES' in group.columns else group['Drug1'].iloc[0]
+        s_b = group['Drug2_SMILES'].iloc[0] if 'Drug2_SMILES' in group.columns else group['Drug2'].iloc[0]
         
-        d_a = row.get('Drug1_Dose', row.get('doses_a', default_d_a))
-        d_b = row.get('Drug2_Dose', row.get('doses_b', default_d_b))
-        if isinstance(d_a, str):
-            try: d_a = json.loads(d_a)
-            except Exception: d_a = default_d_a
-        elif isinstance(d_a, (int, float)):
-            d_a = [d_a]
+        # Check SMILES validity
+        if pd.isna(s_a) or pd.isna(s_b) or not str(s_a).strip() or not str(s_b).strip():
+            continue
             
-        if isinstance(d_b, str):
-            try: d_b = json.loads(d_b)
-            except Exception: d_b = default_d_b
-        elif isinstance(d_b, (int, float)):
-            d_b = [d_b]
+        d_a_unique = np.sort(group['Drug1_Dose'].unique())
+        d_b_unique = np.sort(group['Drug2_Dose'].unique())
+        
+        # Build dose-response viability matrix
+        matrix = np.zeros((len(d_a_unique), len(d_b_unique)), dtype=np.float32)
+        valid_matrix = True
+        
+        for _, row in group.iterrows():
+            r_val = row['Response']
+            if pd.isna(r_val):
+                valid_matrix = False
+                break
+            i = np.where(d_a_unique == row['Drug1_Dose'])[0][0]
+            j = np.where(d_b_unique == row['Drug2_Dose'])[0][0]
+            matrix[i, j] = float(r_val)
             
-        viab = row.get('Response', row.get('viability_matrix', None))
-        if isinstance(viab, str):
-            try: viab = json.loads(viab)
-            except Exception: viab = np.zeros((len(d_a), len(d_b))).tolist()
-        elif isinstance(viab, (int, float)):
-            viab = [[viab]]
-        elif viab is None:
-            viab = np.zeros((len(d_a), len(d_b))).tolist()
+        if not valid_matrix:
+            continue
             
         data_list.append({
             "smiles_a": str(s_a),
             "smiles_b": str(s_b),
             "cell_line_name": str(cell),
-            "doses_a": d_a,
-            "doses_b": d_b,
-            "viability_matrix": viab
+            "doses_a": d_a_unique.tolist(),
+            "doses_b": d_b_unique.tolist(),
+            "viability_matrix": matrix.tolist()
         })
         
-    if known_cells:
-        print(f"Cell Line Extraction Report:")
-        print(f"  Matched: {matched_count}")
-        print(f"  Unmatched: {unmatched_count}")
-        print(f"  Unique Extracted Cells: {len(unique_cells)}")
+    if known_cells_map:
+        total_samples = len(grouped)
+        match_pct = (matched_count / total_samples * 100) if total_samples > 0 else 0
+        print("\n" + "=" * 60)
+        print("CELL-LINE EXTRACTION & PARSING REPORT")
+        print("=" * 60)
+        print(f"Total Raw Unique Samples : {total_samples}")
+        print(f"Successfully Matched     : {matched_count} ({match_pct:.2f}%)")
+        print(f"Unmatched Samples        : {unmatched_count} ({100 - match_pct:.2f}%)")
+        print(f"Unique Matched Cell Lines: {len(unique_cells)}")
         if unmatched_names:
-            print(f"  Sample Unmatched Names: {list(unmatched_names)[:5]}")
-            
+            print(f"Sample Unmatched Names   : {list(unmatched_names)[:5]}")
+        print("=" * 60 + "\n")
+        
     return data_list
 
 

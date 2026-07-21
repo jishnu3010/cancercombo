@@ -108,7 +108,7 @@ def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", c
         return
 
     from dataset import parse_dataframe_to_records
-    test_records = parse_dataframe_to_records(test_df, known_cells=set(cell_features.keys()))
+    test_records = parse_dataframe_to_records(test_df, known_gex_dict=cell_features)
     test_dataset = DrugComboDataset(test_records, cell_features)
     test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
     

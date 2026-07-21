@@ -68,8 +68,8 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
         val_df = val_df.head(max_samples // 4)
         
     from dataset import parse_dataframe_to_records
-    train_data = parse_dataframe_to_records(train_df, known_cells=set(real_gex.keys()))
-    val_data = parse_dataframe_to_records(val_df, known_cells=set(real_gex.keys()))
+    train_data = parse_dataframe_to_records(train_df, known_gex_dict=real_gex)
+    val_data = parse_dataframe_to_records(val_df, known_gex_dict=real_gex)
     cell_features = real_gex
     
     drug_features = load_precomputed_drug_features("data/features/drug_features.pt")

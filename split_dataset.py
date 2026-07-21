@@ -563,14 +563,20 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     logger.info(f"Initialized DatasetSplitter with Random Seed={args.seed}")
     
-    # 1. Load Input Dataset
+    # 1. Load Input Dataset & Gene Expression Data
+    gex_dict = load_nci60_gex()
+    if not gex_dict:
+        raise ValueError("Failed to load NCI-60 GEX landmark data from data/features/NCI-60_landmark_gex.csv")
+        
     if not os.path.exists(args.input_csv):
         logger.warning(f"Input file not found at '{args.input_csv}'. Creating mock dataset for pipeline demonstration...")
-        df = pd.DataFrame({
-            "drug1": [f"Drug_{i%10}" for i in range(100)],
-            "drug2": [f"Drug_{(i+3)%10}" for i in range(100)],
-            "cell": [f"Cell_{i%5}" for i in range(100)],
-            "synergy_score": np.random.randn(100)
+        raw_df = pd.DataFrame({
+            "Sample": [f"Drug_{i%10}_Drug_{(i+3)%10}_MCF7" for i in range(100)],
+            "Drug1_SMILES": ["CCO" for _ in range(100)],
+            "Drug2_SMILES": ["CC(=O)O" for _ in range(100)],
+            "Drug1_Dose": [0.1 for _ in range(100)],
+            "Drug2_Dose": [0.2 for _ in range(100)],
+            "Response": [100.0 for _ in range(100)]
         })
     elif args.input_csv.endswith(".zip"):
         logger.info(f"Extracting dataset from ZIP archive: '{args.input_csv}'...")
@@ -582,24 +588,37 @@ def main():
             for csv_name in csv_names:
                 with z.open(csv_name) as f:
                     dfs.append(pd.read_csv(f))
-            df = pd.concat(dfs, ignore_index=True)
+            raw_df = pd.concat(dfs, ignore_index=True)
     else:
         logger.info(f"Loading CSV dataset: '{args.input_csv}'...")
-        df = pd.read_csv(args.input_csv)
+        raw_df = pd.read_csv(args.input_csv)
         
-    logger.info(f"Loaded input dataset with {len(df)} rows and {len(df.columns)} columns.")
+    logger.info(f"Loaded raw input dataset with {len(raw_df)} rows.")
     
-    # 2. Resolve Column Names
-    drug1_col, drug2_col, cell_col = detect_columns(df, args.drug1_col, args.drug2_col, args.cell_col)
+    # 2. Parse and Group into 2D Dose-Response Matrix Surface Samples
+    logger.info("Parsing and assembling 2D dose-response matrix surface samples...")
+    from dataset import parse_dataframe_to_records
+    records = parse_dataframe_to_records(raw_df, known_gex_dict=gex_dict)
     
-    # 2.5 Extract Robust Cell Lines before Splitting
-    logger.info("Extracting known cell lines for correct cell-wise splitting...")
-    gex_dict = load_nci60_gex()
-    known_cells = set(gex_dict.keys())
+    if not records:
+        raise ValueError("No valid matched surface samples extracted from input dataset!")
+        
+    # Convert records to DataFrame for splitting
+    records_df_list = []
+    for r in records:
+        records_df_list.append({
+            "smiles_a": r["smiles_a"],
+            "smiles_b": r["smiles_b"],
+            "cell_line_name": r["cell_line_name"],
+            "doses_a": json.dumps(r["doses_a"]),
+            "doses_b": json.dumps(r["doses_b"]),
+            "viability_matrix": json.dumps(r["viability_matrix"])
+        })
+    df = pd.DataFrame(records_df_list)
+    logger.info(f"Assembled {len(df)} 2D dose-response surface samples for scenario splitting.")
     
-    if known_cells:
-        df["_extracted_cell"] = df[cell_col].apply(lambda x: match_cell_line(str(x), known_cells))
-        cell_col = "_extracted_cell"
+    # 3. Resolve Column Names
+    drug1_col, drug2_col, cell_col = detect_columns(df, "smiles_a", "smiles_b", "cell_line_name")
     
     # -----------------------------------------------------------------
     # SCENARIO 1 — COMBINATION-WISE SPLIT
