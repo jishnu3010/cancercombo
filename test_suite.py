@@ -1,6 +1,6 @@
 import torch
 try:
-    import pytest
+    import pytest  # type: ignore # pyrefly: ignore [missing-import]
     parametrize = pytest.mark.parametrize
 except ImportError:
     pytest = None
