@@ -45,7 +45,6 @@ cancercombo/
 ├── config.yaml                       # Primary hyperparameter YAML file
 ├── dataset.py                        # Dataset loader & regex SMILES tokenizer
 ├── evaluate.py                       # Checkpoint evaluation script
-├── evaluator.py                      # Batch model evaluator class
 ├── experimenter.py                   # Multi-experiment hyperparameter sweep runner
 ├── helpers.py                        # Seed setter & mock simulation generator
 ├── logger.py                         # Formatted console logger setup
@@ -57,9 +56,7 @@ cancercombo/
 ├── preprocessor.py                   # RDKit Morgan & descriptor preprocessor
 ├── requirements.txt                  # Pinned environment dependencies
 ├── split_dataset.py                  # Scenario 1, 2, 3 dataset splitter script
-├── test_forward.py                   # PyTest shape verification suite
-├── test_hill.py                      # PyTest Hill solver numerical test suite
-└── test_model.py                     # PyTest model integration test suite
+└── test_suite.py                     # Consolidated PyTest verification suite
 ```
 
 ---
@@ -90,11 +87,9 @@ Verify system installation, tensor shape propagation, autograd stability, and pe
 python -m pytest
 ```
 
-Individual test suites can also be executed directly:
+The consolidated test suite can also be executed directly:
 ```bash
-python test_forward.py  # Shape propagation tests
-python test_hill.py     # Hill solver autograd & zero-dose numerical tests
-python test_model.py    # Full model integration & symmetry tests
+python test_suite.py
 ```
 
 ---
