@@ -12,10 +12,11 @@
 - **Differentiable Bivariate Hill Equation**: Predicts 8 log-space pharmacological parameters ($\log C_1, \log C_2, E_1, E_2, E_3, h_1, h_2, \alpha$) to reconstruct smooth 2D viability surfaces with autograd backpropagation.
 - **Numerical Safety Guarantees**: Built-in protection against `log(0)`, single-precision float overflow, and division by zero.
 - **Zero-Leakage Dataset Partitioning**: Precomputes Scenario 1 (Combination-wise), Scenario 2 (Cell-wise), and Scenario 3 (Drug-wise) splits.
+- **Dual Execution Engine**: Supports PyTorch Lightning with automatic native PyTorch fallbacks for training and ablation experiments.
 
 ---
 
-## 📁  Structure
+## 📁 Repository Structure
 
 ```
 cancercombo/
@@ -31,7 +32,7 @@ cancercombo/
 │   ├── prediction_heads.py           # Log-space 8-parameter prediction heads
 │   └── shared_feature.py             # Symmetric combination fusion pooling
 ├── data/                             # Dataset archives & pre-extracted features
-│   ├── DrugCombination_with_SMILES.zip # 1,000,000 sample benchmark archive
+│   ├── DrugCombination_with_SMILES.zip # Benchmark dataset archive
 │   ├── features/                     # Pre-extracted features
 │   │   ├── NCI-60_landmark_gex.csv   # NCI-60 landmark transcriptomics matrix
 │   │   ├── drug_features.pkl         # Precomputed Pickle drug feature store
@@ -45,7 +46,7 @@ cancercombo/
 ├── config.yaml                       # Primary hyperparameter YAML file
 ├── dataset.py                        # Dataset loader & regex SMILES tokenizer
 ├── evaluate.py                       # Checkpoint evaluation script
-├── experimenter.py                   # Multi-experiment hyperparameter sweep runner
+├── experimenter.py                   # Multi-experiment hyperparameter sweep & ablation runner (Dual Engine)
 ├── helpers.py                        # Seed setter & mock simulation generator
 ├── logger.py                         # Formatted console logger setup
 ├── losses.py                         # Composite loss function (MSE + Margin Ranking + Aux)
@@ -55,8 +56,10 @@ cancercombo/
 ├── predictor.py                      # Single & batch inference prediction engine
 ├── preprocessor.py                   # RDKit Morgan & descriptor preprocessor
 ├── requirements.txt                  # Pinned environment dependencies
+├── run_smoke_test.py                 # 23-step end-to-end real-data verification suite
 ├── split_dataset.py                  # Scenario 1, 2, 3 dataset splitter script
-└── test_suite.py                     # Consolidated PyTest verification suite
+├── test_suite.py                     # Consolidated unit test suite (7 test cases)
+└── trainer.py                        # PyTorch Lightning module wrapper
 ```
 
 ---
@@ -79,17 +82,28 @@ cancercombo/
 
 ---
 
-## 🧪 Running Unit & Integration Tests
+## 🧪 Verification & Testing
 
-Verify system installation, tensor shape propagation, autograd stability, and permutation invariance:
+### 1. Run Unit Test Suite
+Verify tensor shape propagation, autograd stability, permutation invariance, and Hill solver numerical safety:
 
-```bash
-python -m pytest
-```
-
-The consolidated test suite can also be executed directly:
 ```bash
 python test_suite.py
+```
+*(Or via pytest: `python -m pytest`)*
+
+### 2. Run End-to-End Real-Data Smoke Test
+Execute the 23-step verification suite against real NCI-60 gene expression features and Scenario 1 split data:
+
+```bash
+python run_smoke_test.py
+```
+
+### 3. Run Hyperparameter Ablation Study
+Execute structural ablation studies (e.g., comparing Drug-Drug Cross-Attention enabled vs. disabled):
+
+```bash
+python experimenter.py
 ```
 
 ---
@@ -115,17 +129,17 @@ python precompute_molecular_features.py --input_csv data/DrugCombination_with_SM
 ## 🚀 Model Training, Evaluation & Inference
 
 ### 1. Model Training
-Train CancerCombo using PyTorch Lightning with automatic mixed precision and GPU acceleration:
+Train CancerCombo using PyTorch Lightning (or native PyTorch fallback) with automatic mixed precision and GPU acceleration:
 
 ```bash
-python main.py --mode train --config config.yaml
+python main.py --mode train --config config.yaml --scenario 1
 ```
 
 ### 2. Checkpoint Evaluation
 Evaluate a trained model checkpoint on test dataset splits:
 
 ```bash
-python main.py --mode evaluate --checkpoint checkpoints/cancercombo_best.ckpt
+python main.py --mode evaluate --checkpoint checkpoints/cancercombo_best.ckpt --scenario 1
 ```
 
 ### 3. Inference Prediction
