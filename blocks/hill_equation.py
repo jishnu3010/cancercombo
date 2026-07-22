@@ -7,6 +7,7 @@ class BivariateHillSolver(nn.Module):
     def __init__(self, e0: float = 100.0):
         super().__init__()
         self.e0 = e0
+        self.register_buffer("dummy_neg", torch.tensor(-100.0), persistent=False)
         
     def forward(
         self,
@@ -85,7 +86,7 @@ class BivariateHillSolver(nn.Module):
             torch.maximum(cand_C, cand_D)
         ).detach()
 
-        dummy_neg = torch.tensor(-100.0, device=doses_a_grid.device, dtype=doses_a_grid.dtype)
+        dummy_neg = self.dummy_neg.to(device=doses_a_grid.device, dtype=doses_a_grid.dtype)
 
         safe_A = torch.clamp(exp_term_A - max_exp, max=50.0)
         safe_B = torch.clamp(torch.where(mask_a, exp_term_B - max_exp, dummy_neg), max=50.0)

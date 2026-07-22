@@ -6,8 +6,13 @@ except ImportError:
         corr = np.corrcoef(x, y)[0, 1]
         return corr, 0.0
     def spearmanr(x, y):
-        rx = np.argsort(np.argsort(x))
-        ry = np.argsort(np.argsort(y))
+        def _rankdata(a):
+            sorter = np.argsort(a)
+            inv = np.empty_like(sorter, dtype=np.float64)
+            inv[sorter] = np.arange(len(a), dtype=np.float64)
+            return inv
+        rx = _rankdata(x)
+        ry = _rankdata(y)
         corr = np.corrcoef(rx, ry)[0, 1]
         return corr, 0.0
 from typing import Dict

@@ -14,7 +14,7 @@ class SynergyPredictor:
         self.device = torch.device(device)
         self.model = CancerCombo(config)
         
-        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=True)
         state_dict = checkpoint.get("state_dict", checkpoint)
         # Strip PyTorch Lightning 'model.' prefix if present
         state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
