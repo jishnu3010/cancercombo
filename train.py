@@ -15,7 +15,7 @@ except ImportError:
     class ModelCheckpoint:
         def __init__(self, *args, **kwargs): pass
 
-from typing import Optional
+from typing import Optional, Any, Iterable
 from config import load_config
 from dataset import DrugComboDataset, load_nci60_gex, load_synergy_dataset, load_precomputed_drug_features
 from trainer import CancerComboLightningModule
@@ -26,12 +26,73 @@ from logger import setup_logger
 
 import argparse
 
+
+def _iter_tensors(obj: Any) -> Iterable[torch.Tensor]:
+    if torch.is_tensor(obj):
+        yield obj
+    elif isinstance(obj, (tuple, list)):
+        for item in obj:
+            yield from _iter_tensors(item)
+    elif isinstance(obj, dict):
+        for item in obj.values():
+            yield from _iter_tensors(item)
+
+
+def _register_backward_debug_hooks(net: torch.nn.Module, logger):
+    """Attach gradient hooks to the main backward path for first-batch debugging."""
+
+    handles = []
+
+    def attach_output_hooks(module: torch.nn.Module, name: str):
+        def _forward_hook(_module, _inputs, outputs):
+            for idx, tensor in enumerate(_iter_tensors(outputs)):
+                if not tensor.requires_grad:
+                    continue
+
+                tensor.retain_grad()
+
+                def _grad_hook(grad, module_name=name, output_index=idx):
+                    grad_norm = float(grad.norm().item()) if grad.numel() > 0 else 0.0
+                    logger.info(
+                        f"[BACKWARD DEBUG] grad reached {module_name}[{output_index}] "
+                        f"shape={tuple(grad.shape)} dtype={grad.dtype} norm={grad_norm:.6f}"
+                    )
+                    return grad
+
+                tensor.register_hook(_grad_hook)
+
+        handles.append(module.register_forward_hook(_forward_hook))
+
+    target_modules = [
+        (net.molformer_enc, "molformer_enc"),
+        (net.molformer_enc.transformer, "molformer_enc.transformer"),
+        (net.molformer_enc.transformer.layers[0], "molformer_enc.transformer.layers[0]"),
+        (net.molformer_enc.transformer.layers[0].self_attn, "molformer_enc.transformer.layers[0].self_attn"),
+        (net.molformer_enc.transformer.layers[1], "molformer_enc.transformer.layers[1]"),
+        (net.molformer_enc.transformer.layers[1].self_attn, "molformer_enc.transformer.layers[1].self_attn"),
+        (net.fusion, "fusion"),
+        (net.fusion.self_attn, "fusion.self_attn"),
+        (net.cell_enc, "cell_enc"),
+        (net.drug_cell_attn, "drug_cell_attn"),
+        (net.drug_cell_attn.cross_attn, "drug_cell_attn.cross_attn"),
+        (net.symmetric_fusion, "symmetric_fusion"),
+        (net.heads, "heads"),
+        (net.hill_solver, "hill_solver"),
+    ]
+
+    for module, name in target_modules:
+        attach_output_hooks(module, name)
+
+    logger.info("[BACKWARD DEBUG] Registered gradient hooks for the main backward path.")
+    return handles
+
 def run_training(
     config_path: str = "config.yaml",
     epochs: Optional[int] = None,
     max_samples: Optional[int] = None,
     scenario: int = 1,
-    engine: str = "auto"
+    engine: str = "auto",
+    debug_backprop: bool = False
 ):
     """Initializes dataset generators and executes full model training.
 
@@ -169,97 +230,110 @@ def run_training(
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
         best_val_loss = float("inf")
         os.makedirs(t_config.checkpoint_dir, exist_ok=True)
-        
-        for epoch in range(1, t_config.epochs + 1):
-            net.train()
-            train_loss_sum = 0.0
-            pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{t_config.epochs}", leave=True)
-            
-            for batch_idx, batch in enumerate(pbar):
-                if epoch == 1 and batch_idx == 0:
-                    logger.info("DEBUG [Batch 0]: Starting first training step...")
-                    
-                optimizer.zero_grad()
-                
-                if epoch == 1 and batch_idx == 0:
-                    logger.info("DEBUG [Batch 0]: Transferring inputs to GPU...")
-                b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-                
-                if epoch == 1 and batch_idx == 0:
-                    logger.info("DEBUG [Batch 0]: Running model forward pass...")
-                y_pred, params = net(
-                    b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
-                    b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
-                    b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
-                )
-                
-                if epoch == 1 and batch_idx == 0:
-                    logger.info("DEBUG [Batch 0]: Computing CancerCombo loss...")
-                loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
-                
-                if epoch == 1 and batch_idx == 0:
-                    logger.info("DEBUG [Batch 0]: Executing loss.backward()...")
-                loss.backward()
-                
-                if epoch == 1 and batch_idx == 0:
-                    logger.info("DEBUG [Batch 0]: Clipping gradients...")
-                torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=5.0)
-                
-                if epoch == 1 and batch_idx == 0:
-                    logger.info("DEBUG [Batch 0]: Executing optimizer.step()...")
-                optimizer.step()
-                
-                if epoch == 1 and batch_idx == 0:
-                    logger.info("DEBUG [Batch 0]: Step finished successfully!")
-                    
-                train_loss_sum += loss.item()
-                pbar.set_postfix({"train_loss_step": f"{loss.item():.4f}"})
-                
-            train_loss = train_loss_sum / max(len(train_loader), 1)
-            
-            # Validation step
-            net.eval()
-            val_loss_sum = 0.0
-            val_preds_list, val_trues_list = [], []
-            with torch.no_grad():
-                for batch_idx_val, batch in enumerate(val_loader):
-                    if epoch == 1 and batch_idx_val == 0:
-                        logger.info("DEBUG [Val Batch 0]: Starting first validation step...")
+        hook_handles = []
+        if debug_backprop:
+            hook_handles = _register_backward_debug_hooks(net, logger)
+
+        try:
+            for epoch in range(1, t_config.epochs + 1):
+                net.train()
+                train_loss_sum = 0.0
+                pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{t_config.epochs}", leave=True)
+
+                for batch_idx, batch in enumerate(pbar):
+                    if epoch == 1 and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Starting first training step...")
+
+                    optimizer.zero_grad()
+
+                    if epoch == 1 and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Transferring inputs to GPU...")
                     b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+
+                    if epoch == 1 and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Running model forward pass...")
                     y_pred, params = net(
                         b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
                         b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
                         b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
                     )
-                    v_loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
-                    val_loss_sum += v_loss.item()
-                    val_preds_list.append(y_pred.detach().cpu().numpy())
-                    val_trues_list.append(b_gpu.get("viability", b_gpu.get("viability_matrix")).detach().cpu().numpy())
-                    
-            val_loss = val_loss_sum / max(len(val_loader), 1)
-            scheduler.step(val_loss)
-            
-            if val_preds_list:
-                v_preds = np.concatenate(val_preds_list, axis=0)
-                v_trues = np.concatenate(val_trues_list, axis=0)
-                val_metrics = calculate_metrics(v_preds, v_trues)
-                v_rmse = val_metrics["rmse"]
-                v_pearson = val_metrics["pearson"]
-                v_spearman = val_metrics["spearman"]
-            else:
-                v_rmse, v_pearson, v_spearman = 0.0, 0.0, 0.0
-                
-            logger.info(
-                f"Epoch [{epoch}/{t_config.epochs}] Complete | "
-                f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
-                f"Val RMSE: {v_rmse:.4f} | Val Pearson: {v_pearson:.4f} | Val Spearman: {v_spearman:.4f}"
-            )
-            
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                ckpt_path = os.path.join(t_config.checkpoint_dir, "cancercombo_best.ckpt")
-                torch.save({"state_dict": net.state_dict(), "config": m_config}, ckpt_path)
-                logger.info(f"Saved best model checkpoint to '{ckpt_path}'")
+
+                    if epoch == 1 and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Computing CancerCombo loss...")
+                    loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
+
+                    if debug_backprop and epoch == 1 and batch_idx == 0:
+                        logger.info(
+                            f"[BACKWARD DEBUG] loss ready shape={tuple(loss.shape)} dtype={loss.dtype} "
+                            f"requires_grad={loss.requires_grad}"
+                        )
+                        logger.info("[BACKWARD DEBUG] Starting loss.backward()...")
+                    elif epoch == 1 and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Executing loss.backward()...")
+                    loss.backward()
+
+                    if epoch == 1 and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Clipping gradients...")
+                    torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=5.0)
+
+                    if epoch == 1 and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Executing optimizer.step()...")
+                    optimizer.step()
+
+                    if epoch == 1 and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Step finished successfully!")
+
+                    train_loss_sum += loss.item()
+                    pbar.set_postfix({"train_loss_step": f"{loss.item():.4f}"})
+
+                train_loss = train_loss_sum / max(len(train_loader), 1)
+
+                # Validation step
+                net.eval()
+                val_loss_sum = 0.0
+                val_preds_list, val_trues_list = [], []
+                with torch.no_grad():
+                    for batch_idx_val, batch in enumerate(val_loader):
+                        if epoch == 1 and batch_idx_val == 0:
+                            logger.info("DEBUG [Val Batch 0]: Starting first validation step...")
+                        b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+                        y_pred, params = net(
+                            b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
+                            b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
+                            b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
+                        )
+                        v_loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
+                        val_loss_sum += v_loss.item()
+                        val_preds_list.append(y_pred.detach().cpu().numpy())
+                        val_trues_list.append(b_gpu.get("viability", b_gpu.get("viability_matrix")).detach().cpu().numpy())
+
+                val_loss = val_loss_sum / max(len(val_loader), 1)
+                scheduler.step(val_loss)
+
+                if val_preds_list:
+                    v_preds = np.concatenate(val_preds_list, axis=0)
+                    v_trues = np.concatenate(val_trues_list, axis=0)
+                    val_metrics = calculate_metrics(v_preds, v_trues)
+                    v_rmse = val_metrics["rmse"]
+                    v_pearson = val_metrics["pearson"]
+                    v_spearman = val_metrics["spearman"]
+                else:
+                    v_rmse, v_pearson, v_spearman = 0.0, 0.0, 0.0
+
+                logger.info(
+                    f"Epoch [{epoch}/{t_config.epochs}] Complete | "
+                    f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
+                    f"Val RMSE: {v_rmse:.4f} | Val Pearson: {v_pearson:.4f} | Val Spearman: {v_spearman:.4f}"
+                )
+
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    ckpt_path = os.path.join(t_config.checkpoint_dir, "cancercombo_best.ckpt")
+                    torch.save({"state_dict": net.state_dict(), "config": m_config}, ckpt_path)
+                    logger.info(f"Saved best model checkpoint to '{ckpt_path}'")
+        finally:
+            for handle in hook_handles:
+                handle.remove()
                 
     logger.info("Training finished successfully.")
 
@@ -270,6 +344,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument("--scenario", type=int, default=1, help="Split scenario (1, 2, or 3)")
     parser.add_argument("--engine", type=str, default="auto", choices=["auto", "lightning", "native"], help="Training engine: auto, lightning, or native")
+    parser.add_argument("--debug_backprop", action="store_true", help="Attach backward trace hooks to the native training path")
     args = parser.parse_args()
     
     run_training(
@@ -277,5 +352,6 @@ if __name__ == "__main__":
         epochs=args.epochs,
         max_samples=args.max_samples,
         scenario=args.scenario,
-        engine=args.engine
+        engine=args.engine,
+        debug_backprop=args.debug_backprop
     )
