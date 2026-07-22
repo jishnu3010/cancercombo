@@ -83,9 +83,9 @@ def main():
     parser.add_argument(
         "--engine",
         type=str,
-        default="auto",
+        default="native",
         choices=["auto", "lightning", "native"],
-        help="Execution engine: auto, lightning, or native (default: auto)"
+        help="Execution engine: native, lightning, or auto (default: native)"
     )
     
     args = parser.parse_args()

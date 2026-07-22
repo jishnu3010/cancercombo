@@ -112,7 +112,7 @@ def run_training(
     val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
     
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
-    use_lightning = (engine == "lightning") or (engine == "auto" and pl is not None)
+    use_lightning = (engine == "lightning")
     
     if use_lightning:
         logger.info("Initializing LightningModule...")
@@ -132,13 +132,9 @@ def run_training(
             "gradient_clip_val": 5.0,
             "callbacks": [checkpoint_callback],
             "enable_checkpointing": True,
-            "log_every_n_steps": 50
+            "log_every_n_steps": 50,
+            "precision": "32-true"
         }
-        if accelerator == "gpu":
-            if hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported():
-                trainer_kwargs["precision"] = "bf16-mixed"
-            else:
-                trainer_kwargs["precision"] = "16-mixed"
         trainer = pl.Trainer(**trainer_kwargs)
         trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
     else:
