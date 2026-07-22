@@ -6,6 +6,57 @@ except ImportError:
     AutoModel, AutoTokenizer = None, None
 from typing import Tuple, Optional
 
+class LocalTransformerEncoderLayer(nn.Module):
+    """Explicit Transformer encoder layer using nn.MultiheadAttention directly (avoids nested tensor bugs)."""
+    
+    def __init__(self, d_model: int = 256, nhead: int = 4, dim_feedforward: int = 512, dropout: float = 0.1):
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(
+            embed_dim=d_model,
+            num_heads=nhead,
+            dropout=dropout,
+            batch_first=True
+        )
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+        
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+        
+    def forward(self, src: torch.Tensor, src_key_padding_mask: torch.Tensor) -> torch.Tensor:
+        # Multi-head self-attention
+        attn_out, _ = self.self_attn(
+            query=src, key=src, value=src,
+            key_padding_mask=src_key_padding_mask
+        )
+        x = src + self.dropout1(attn_out)
+        x = self.norm1(x)
+        
+        # Feed-forward network
+        ffn_out = self.linear2(self.dropout(torch.relu(self.linear1(x))))
+        x = x + self.dropout2(ffn_out)
+        x = self.norm2(x)
+        return x
+
+class LocalTransformerEncoder(nn.Module):
+    """Transformer encoder chain utilizing LocalTransformerEncoderLayers."""
+    
+    def __init__(self, d_model: int = 256, nhead: int = 4, dim_feedforward: int = 512, num_layers: int = 2, dropout: float = 0.1):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            LocalTransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout)
+            for _ in range(num_layers)
+        ])
+        
+    def forward(self, src: torch.Tensor, src_key_padding_mask: torch.Tensor) -> torch.Tensor:
+        x = src
+        for layer in self.layers:
+            x = layer(x, src_key_padding_mask)
+        return x
+
 class MolFormerEncoder(nn.Module):
     """MolFormer feature extraction encoder wrapper with transformer fallback."""
     
@@ -34,14 +85,13 @@ class MolFormerEncoder(nn.Module):
         if not self.use_pretrained:
             self.embedding = nn.Embedding(vocab_size, d_model)
             self.pos_encoder = nn.Parameter(torch.randn(1, max_seq_len, d_model))
-            encoder_layer = nn.TransformerEncoderLayer(
+            self.transformer = LocalTransformerEncoder(
                 d_model=d_model,
                 nhead=4,
                 dim_feedforward=d_model * 2,
-                batch_first=True,
+                num_layers=2,
                 dropout=0.1
             )
-            self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2)
             self.proj = nn.Identity()
             
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
