@@ -167,11 +167,6 @@ def run_training(
         loss_fn = CancerComboLoss()
         optimizer = torch.optim.AdamW(net.parameters(), lr=t_config.lr, weight_decay=t_config.weight_decay)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
-        if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
-            scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
-        else:
-            scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
-        
         best_val_loss = float("inf")
         os.makedirs(t_config.checkpoint_dir, exist_ok=True)
         
@@ -181,24 +176,42 @@ def run_training(
             pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{t_config.epochs}", leave=True)
             
             for batch_idx, batch in enumerate(pbar):
+                if epoch == 1 and batch_idx == 0:
+                    logger.info("DEBUG [Batch 0]: Starting first training step...")
+                    
                 optimizer.zero_grad()
+                
+                if epoch == 1 and batch_idx == 0:
+                    logger.info("DEBUG [Batch 0]: Transferring inputs to GPU...")
                 b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
                 
-                autocast_ctx = torch.amp.autocast("cuda", enabled=(device.type == "cuda")) if hasattr(torch, "amp") and hasattr(torch.amp, "autocast") else torch.cuda.amp.autocast(enabled=(device.type == "cuda"))
-                with autocast_ctx:
-                    y_pred, params = net(
-                        b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
-                        b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
-                        b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
-                    )
-                    loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
+                if epoch == 1 and batch_idx == 0:
+                    logger.info("DEBUG [Batch 0]: Running model forward pass...")
+                y_pred, params = net(
+                    b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
+                    b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
+                    b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
+                )
                 
-                scaler.scale(loss).backward()
-                scaler.unscale_(optimizer)
+                if epoch == 1 and batch_idx == 0:
+                    logger.info("DEBUG [Batch 0]: Computing CancerCombo loss...")
+                loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
+                
+                if epoch == 1 and batch_idx == 0:
+                    logger.info("DEBUG [Batch 0]: Executing loss.backward()...")
+                loss.backward()
+                
+                if epoch == 1 and batch_idx == 0:
+                    logger.info("DEBUG [Batch 0]: Clipping gradients...")
                 torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=5.0)
-                scaler.step(optimizer)
-                scaler.update()
                 
+                if epoch == 1 and batch_idx == 0:
+                    logger.info("DEBUG [Batch 0]: Executing optimizer.step()...")
+                optimizer.step()
+                
+                if epoch == 1 and batch_idx == 0:
+                    logger.info("DEBUG [Batch 0]: Step finished successfully!")
+                    
                 train_loss_sum += loss.item()
                 pbar.set_postfix({"train_loss_step": f"{loss.item():.4f}"})
                 
@@ -209,16 +222,16 @@ def run_training(
             val_loss_sum = 0.0
             val_preds_list, val_trues_list = [], []
             with torch.no_grad():
-                for batch in val_loader:
+                for batch_idx_val, batch in enumerate(val_loader):
+                    if epoch == 1 and batch_idx_val == 0:
+                        logger.info("DEBUG [Val Batch 0]: Starting first validation step...")
                     b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-                    autocast_ctx = torch.amp.autocast("cuda", enabled=(device.type == "cuda")) if hasattr(torch, "amp") and hasattr(torch.amp, "autocast") else torch.cuda.amp.autocast(enabled=(device.type == "cuda"))
-                    with autocast_ctx:
-                        y_pred, params = net(
-                            b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
-                            b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
-                            b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
-                        )
-                        v_loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
+                    y_pred, params = net(
+                        b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
+                        b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
+                        b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
+                    )
+                    v_loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
                     val_loss_sum += v_loss.item()
                     val_preds_list.append(y_pred.detach().cpu().numpy())
                     val_trues_list.append(b_gpu.get("viability", b_gpu.get("viability_matrix")).detach().cpu().numpy())
