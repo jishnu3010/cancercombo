@@ -38,19 +38,23 @@ def calculate_metrics(y_pred: np.ndarray, y_true: np.ndarray, top_k_ratio: float
     r2_val = 1.0 - (ss_res / (ss_tot + 1e-12)) if ss_tot > 1e-12 else 0.0
     
     # Correlation metrics
-    try:
-        pearson_val, _ = pearsonr(pred_flat, true_flat)
-        if np.isnan(pearson_val):
-            pearson_val = 0.0
-    except Exception:
+    if np.std(pred_flat) < 1e-9 or np.std(true_flat) < 1e-9:
         pearson_val = 0.0
-        
-    try:
-        spearman_val, _ = spearmanr(pred_flat, true_flat)
-        if np.isnan(spearman_val):
-            spearman_val = 0.0
-    except Exception:
         spearman_val = 0.0
+    else:
+        try:
+            pearson_val, _ = pearsonr(pred_flat, true_flat)
+            if np.isnan(pearson_val):
+                pearson_val = 0.0
+        except Exception:
+            pearson_val = 0.0
+            
+        try:
+            spearman_val, _ = spearmanr(pred_flat, true_flat)
+            if np.isnan(spearman_val):
+                spearman_val = 0.0
+        except Exception:
+            spearman_val = 0.0
         
     # Top-K Synergy / Maximum Inhibition Ranking Metrics
     # In drug viability, lowest viability = highest inhibition / maximum synergy

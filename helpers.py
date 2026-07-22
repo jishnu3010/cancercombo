@@ -3,12 +3,73 @@ import numpy as np
 import random
 from typing import Dict, List, Tuple, Any
 
+import os
+import shutil
+
+def patch_triton_fallback() -> None:
+    """Detects host C compiler and patches PyTorch native Triton eager ops with pure PyTorch fallback
+    if host C compiler (gcc/clang) is missing or Triton compilation fails.
+    """
+    if "CC" not in os.environ:
+        for cc_candidate in ["gcc", "g++", "clang", "cc"]:
+            cc_path = shutil.which(cc_candidate)
+            if cc_path:
+                os.environ["CC"] = cc_path
+                break
+
+    try:
+        import torch._native.ops.bmm_outer_product.triton_impl as triton_impl
+        orig_impl = getattr(triton_impl, "_bmm_outer_product_impl", None)
+        
+        def fallback_bmm_outer_product(a, b):
+            if orig_impl is not None:
+                try:
+                    return orig_impl(a, b)
+                except Exception:
+                    pass
+            if a.dim() == 2:
+                a = a.unsqueeze(-1)
+            if b.dim() == 2:
+                b = b.unsqueeze(1)
+            if a.dim() == 3 and b.dim() == 3 and a.size(2) == 1 and b.size(1) == 1:
+                return torch.bmm(a, b)
+            return a * b
+
+        triton_impl._bmm_outer_product_impl = fallback_bmm_outer_product
+    except (ImportError, AttributeError):
+        pass
+
+    try:
+        import torch._native.ops.bmm_outer_product.triton_kernels as triton_kernels
+        orig_kernel = getattr(triton_kernels, "bmm_outer_product", None)
+
+        def fallback_kernel(a, b):
+            if orig_kernel is not None:
+                try:
+                    return orig_kernel(a, b)
+                except Exception:
+                    pass
+            if a.dim() == 2:
+                a = a.unsqueeze(-1)
+            if b.dim() == 2:
+                b = b.unsqueeze(1)
+            if a.dim() == 3 and b.dim() == 3 and a.size(2) == 1 and b.size(1) == 1:
+                return torch.bmm(a, b)
+            return a * b
+
+        triton_kernels.bmm_outer_product = fallback_kernel
+    except (ImportError, AttributeError):
+        pass
+
+patch_triton_fallback()
+
 def set_seed(seed: int = 42) -> None:
     """Set random seed for reproducibility across packages.
 
     Args:
         seed: Integer seed value.
     """
+    patch_triton_fallback()
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)

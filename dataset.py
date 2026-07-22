@@ -10,6 +10,11 @@ import pandas as pd
 from preprocessor import MolecularPreprocessor
 from typing import List, Dict, Tuple, Any, Optional
 
+def _to_tensor(x: Any, dtype: torch.dtype) -> torch.Tensor:
+    if isinstance(x, torch.Tensor):
+        return x.detach().clone().to(dtype)
+    return torch.tensor(x, dtype=dtype)
+
 SMILES_REGEX = r"(\[[^\]]+\]|Br|Cl|Si|Se|B|C|N|O|P|S|F|I|b|c|n|o|p|s|==|#|%[0-9]{2}|[0-9]|\+|-|=|/|\\|\@|\.|\(|\)|~|\*)"
 
 class SMILESTokenizer:
@@ -399,20 +404,20 @@ class DrugComboDataset(Dataset):
         assert cell_vec.shape[-1] == 976, f"Expected 976-dim gene expression vector, got {cell_vec.shape[-1]}"
             
         res_dict = {
-            "drug_a_ids": torch.tensor(ids_a, dtype=torch.long),
-            "drug_a_mask": torch.tensor(mask_a, dtype=torch.float32),
-            "drug_a_morgan": torch.tensor(morgan_a, dtype=torch.float32),
-            "drug_a_desc": torch.tensor(desc_a, dtype=torch.float32),
+            "drug_a_ids": _to_tensor(ids_a, dtype=torch.long),
+            "drug_a_mask": _to_tensor(mask_a, dtype=torch.float32),
+            "drug_a_morgan": _to_tensor(morgan_a, dtype=torch.float32),
+            "drug_a_desc": _to_tensor(desc_a, dtype=torch.float32),
             
-            "drug_b_ids": torch.tensor(ids_b, dtype=torch.long),
-            "drug_b_mask": torch.tensor(mask_b, dtype=torch.float32),
-            "drug_b_morgan": torch.tensor(morgan_b, dtype=torch.float32),
-            "drug_b_desc": torch.tensor(desc_b, dtype=torch.float32),
+            "drug_b_ids": _to_tensor(ids_b, dtype=torch.long),
+            "drug_b_mask": _to_tensor(mask_b, dtype=torch.float32),
+            "drug_b_morgan": _to_tensor(morgan_b, dtype=torch.float32),
+            "drug_b_desc": _to_tensor(desc_b, dtype=torch.float32),
             
-            "cell_line": torch.tensor(cell_vec, dtype=torch.float32),
-            "doses_a": torch.tensor(doses_a, dtype=torch.float32),
-            "doses_b": torch.tensor(doses_b, dtype=torch.float32),
-            "viability": torch.tensor(viability, dtype=torch.float32)
+            "cell_line": _to_tensor(cell_vec, dtype=torch.float32),
+            "doses_a": _to_tensor(doses_a, dtype=torch.float32),
+            "doses_b": _to_tensor(doses_b, dtype=torch.float32),
+            "viability": _to_tensor(viability, dtype=torch.float32)
         }
         
         # Include optional Hill parameters for auxiliary supervision if present
