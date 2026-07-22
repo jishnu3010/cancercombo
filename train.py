@@ -167,6 +167,12 @@ def run_training(
     
     train_dataset = DrugComboDataset(train_data, cell_features, drug_feature_store=drug_features)
     val_dataset = DrugComboDataset(val_data, cell_features, drug_feature_store=drug_features)
+
+    logger.info(
+        "Dataset sizes | "
+        f"train_records={len(train_data)} train_dataset={len(train_dataset)} "
+        f"val_records={len(val_data)} val_dataset={len(val_dataset)}"
+    )
     
     num_workers = getattr(t_config, "num_workers", 0)
     # Disable pin_memory by default to prevent Docker/Jupyter hub memory-lock (ulimit) deadlocks/slowdowns.
@@ -183,6 +189,12 @@ def run_training(
         
     train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
     val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
+
+    logger.info(
+        "DataLoader sizes | "
+        f"train_batches={len(train_loader)} val_batches={len(val_loader)} "
+        f"batch_size={t_config.batch_size} num_workers={num_workers}"
+    )
     
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     use_lightning = (engine == "lightning" or (engine == "auto" and pl is not None and hasattr(pl, "Trainer")))
@@ -219,6 +231,12 @@ def run_training(
         trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
     else:
         logger.info(f"Starting Native PyTorch Training Engine on {accelerator.upper()} for {t_config.epochs} epochs...")
+        if len(train_loader) == 0:
+            logger.error(
+                "Training DataLoader is empty. Epoch loop will not run. "
+                "Check split parsing, cell-line matching, and filter conditions in dataset.py."
+            )
+            return
         from tqdm import tqdm
         from metrics import calculate_metrics
         import numpy as np
