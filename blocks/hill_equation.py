@@ -75,11 +75,25 @@ class BivariateHillSolver(nn.Module):
         exp_term_C = log_c1 * h1_u + log_x2 * h2_u
         exp_term_D = log_x1 * h1_u + log_x2 * h2_u
 
+        # Broadcast all intermediate log-exponents and masks to the full grid shape (B, M, N)
+        # explicitly before any mathematical operations. This avoids implicit autograd broadcasting
+        # inside torch.maximum and torch.where, which is prone to CUDA synchronization deadlocks.
+        B, M, N = doses_a_grid.size(0), doses_a_grid.size(1), doses_b_grid.size(2)
+        
+        exp_term_A_exp = exp_term_A.expand(B, M, N)
+        exp_term_B_exp = exp_term_B.expand(B, M, N)
+        exp_term_C_exp = exp_term_C.expand(B, M, N)
+        exp_term_D_exp = exp_term_D.expand(B, M, N)
+        
+        mask_a_exp = mask_a.expand(B, M, N)
+        mask_b_exp = mask_b.expand(B, M, N)
+        mask_ab_exp = mask_ab.expand(B, M, N)
+
         # Compute maximum exponent across active terms per batch element for numerical stability
-        cand_A = exp_term_A
-        cand_B = torch.where(mask_a, exp_term_B, torch.full_like(exp_term_B, -1e9))
-        cand_C = torch.where(mask_b, exp_term_C, torch.full_like(exp_term_C, -1e9))
-        cand_D = torch.where(mask_ab, exp_term_D, torch.full_like(exp_term_D, -1e9))
+        cand_A = exp_term_A_exp
+        cand_B = torch.where(mask_a_exp, exp_term_B_exp, torch.full_like(exp_term_B_exp, -1e9))
+        cand_C = torch.where(mask_b_exp, exp_term_C_exp, torch.full_like(exp_term_C_exp, -1e9))
+        cand_D = torch.where(mask_ab_exp, exp_term_D_exp, torch.full_like(exp_term_D_exp, -1e9))
 
         max_exp = torch.maximum(
             torch.maximum(cand_A, cand_B),
@@ -88,15 +102,15 @@ class BivariateHillSolver(nn.Module):
 
         dummy_neg = self.dummy_neg.to(device=doses_a_grid.device, dtype=doses_a_grid.dtype)
 
-        safe_A = torch.clamp(exp_term_A - max_exp, max=50.0)
-        safe_B = torch.clamp(torch.where(mask_a, exp_term_B - max_exp, dummy_neg), max=50.0)
-        safe_C = torch.clamp(torch.where(mask_b, exp_term_C - max_exp, dummy_neg), max=50.0)
-        safe_D = torch.clamp(torch.where(mask_ab, exp_term_D - max_exp, dummy_neg), max=50.0)
+        safe_A = torch.clamp(exp_term_A_exp - max_exp, max=50.0)
+        safe_B = torch.clamp(torch.where(mask_a_exp, exp_term_B_exp - max_exp, dummy_neg), max=50.0)
+        safe_C = torch.clamp(torch.where(mask_b_exp, exp_term_C_exp - max_exp, dummy_neg), max=50.0)
+        safe_D = torch.clamp(torch.where(mask_ab_exp, exp_term_D_exp - max_exp, dummy_neg), max=50.0)
 
         exp_A = torch.exp(safe_A)
-        exp_B = torch.where(mask_a, torch.exp(safe_B), torch.zeros_like(exp_term_B))
-        exp_C = torch.where(mask_b, torch.exp(safe_C), torch.zeros_like(exp_term_C))
-        exp_D = torch.where(mask_ab, torch.exp(safe_D), torch.zeros_like(exp_term_D))
+        exp_B = torch.where(mask_a_exp, torch.exp(safe_B), torch.zeros_like(exp_term_B_exp))
+        exp_C = torch.where(mask_b_exp, torch.exp(safe_C), torch.zeros_like(exp_term_C_exp))
+        exp_D = torch.where(mask_ab_exp, torch.exp(safe_D), torch.zeros_like(exp_term_D_exp))
 
         numerator = self.e0 * exp_A + e1_u * exp_B + e2_u * exp_C + e3_u * alpha_u * exp_D
         denominator = exp_A + exp_B + exp_C + alpha_u * exp_D

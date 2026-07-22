@@ -46,16 +46,16 @@ class CancerComboLoss(nn.Module):
         true2 = true_flat[:, idx2] # (B, P)
         
         target_sign = torch.sign(true1 - true2) # +1 if true1 > true2, -1 if true1 < true2
-        valid_pairs = target_sign != 0
+        valid_mask = (target_sign != 0).float()
         
-        if not valid_pairs.any():
+        if not valid_mask.any():
             return torch.tensor(0.0, device=y_pred.device, dtype=y_pred.dtype)
             
-        p1 = pred1[valid_pairs]
-        p2 = pred2[valid_pairs]
-        y = target_sign[valid_pairs]
-        
-        return self.margin_ranking(p1, p2, y)
+        # Mathematically equivalent pairwise margin ranking loss using a dense multiplier mask.
+        # This keeps shapes static/known and avoids the dynamic CUDA masked_select reduction deadlock.
+        loss_pairs = torch.clamp(-target_sign * (pred1 - pred2), min=0.0)
+        num_valid = valid_mask.sum().clamp(min=1.0)
+        return (loss_pairs * valid_mask).sum() / num_valid
 
     def forward(
         self,
