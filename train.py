@@ -78,7 +78,7 @@ def run_training(
     
     if max_samples is not None:
         train_df = train_df.head(max_samples)
-        val_df = val_df.head(max_samples // 4)
+        val_df = val_df.head(max(1, max_samples // 4))
         
     from dataset import parse_dataframe_to_records
     train_data = parse_dataframe_to_records(train_df, known_gex_dict=real_gex)
@@ -112,7 +112,7 @@ def run_training(
     val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
     
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
-    use_lightning = (engine == "lightning")
+    use_lightning = (engine == "lightning" or (engine == "auto" and pl is not None and hasattr(pl, "Trainer")))
     
     if use_lightning:
         logger.info("Initializing LightningModule...")
@@ -124,21 +124,32 @@ def run_training(
             monitor="val_loss",
             mode="min"
         )
+        try:
+            from pytorch_lightning.callbacks import TQDMProgressBar
+            pbar_callback = TQDMProgressBar(refresh_rate=1, leave=True)
+            callbacks_list = [checkpoint_callback, pbar_callback]
+        except Exception:
+            callbacks_list = [checkpoint_callback]
+            
         logger.info(f"Starting PyTorch Lightning trainer fit on {accelerator.upper()} for {t_config.epochs} epochs...")
         trainer_kwargs = {
             "max_epochs": t_config.epochs,
             "accelerator": accelerator,
             "devices": 1,
             "gradient_clip_val": 5.0,
-            "callbacks": [checkpoint_callback],
+            "callbacks": callbacks_list,
             "enable_checkpointing": True,
-            "log_every_n_steps": 50,
+            "log_every_n_steps": 1,
             "precision": "32-true"
         }
         trainer = pl.Trainer(**trainer_kwargs)
         trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
     else:
         logger.info(f"Starting Native PyTorch Training Engine on {accelerator.upper()} for {t_config.epochs} epochs...")
+        from tqdm import tqdm
+        from metrics import calculate_metrics
+        import numpy as np
+
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         net = CancerCombo(m_config).to(device)
         loss_fn = CancerComboLoss()
@@ -153,10 +164,11 @@ def run_training(
         os.makedirs(t_config.checkpoint_dir, exist_ok=True)
         
         for epoch in range(1, t_config.epochs + 1):
-            logger.info(f"--- Epoch [{epoch}/{t_config.epochs}] Started ---")
             net.train()
             train_loss_sum = 0.0
-            for batch_idx, batch in enumerate(train_loader):
+            pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{t_config.epochs}", leave=True)
+            
+            for batch_idx, batch in enumerate(pbar):
                 optimizer.zero_grad()
                 b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
                 
@@ -174,16 +186,16 @@ def run_training(
                 torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=5.0)
                 scaler.step(optimizer)
                 scaler.update()
-                train_loss_sum += loss.item()
                 
-                if (batch_idx + 1) == 1 or (batch_idx + 1) % 50 == 0 or (batch_idx + 1) == len(train_loader):
-                    logger.info(f"Epoch [{epoch}/{t_config.epochs}] | Step [{batch_idx + 1}/{len(train_loader)}] | Train Batch Loss: {loss.item():.4f}")
+                train_loss_sum += loss.item()
+                pbar.set_postfix({"train_loss_step": f"{loss.item():.4f}"})
                 
             train_loss = train_loss_sum / max(len(train_loader), 1)
             
             # Validation step
             net.eval()
             val_loss_sum = 0.0
+            val_preds_list, val_trues_list = [], []
             with torch.no_grad():
                 for batch in val_loader:
                     b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
@@ -196,11 +208,27 @@ def run_training(
                         )
                         v_loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
                     val_loss_sum += v_loss.item()
+                    val_preds_list.append(y_pred.detach().cpu().numpy())
+                    val_trues_list.append(b_gpu.get("viability", b_gpu.get("viability_matrix")).detach().cpu().numpy())
                     
             val_loss = val_loss_sum / max(len(val_loader), 1)
             scheduler.step(val_loss)
             
-            logger.info(f"Epoch [{epoch}/{t_config.epochs}] Complete | Avg Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}")
+            if val_preds_list:
+                v_preds = np.concatenate(val_preds_list, axis=0)
+                v_trues = np.concatenate(val_trues_list, axis=0)
+                val_metrics = calculate_metrics(v_preds, v_trues)
+                v_rmse = val_metrics["rmse"]
+                v_pearson = val_metrics["pearson"]
+                v_spearman = val_metrics["spearman"]
+            else:
+                v_rmse, v_pearson, v_spearman = 0.0, 0.0, 0.0
+                
+            logger.info(
+                f"Epoch [{epoch}/{t_config.epochs}] Complete | "
+                f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
+                f"Val RMSE: {v_rmse:.4f} | Val Pearson: {v_pearson:.4f} | Val Spearman: {v_spearman:.4f}"
+            )
             
             if val_loss < best_val_loss:
                 best_val_loss = val_loss

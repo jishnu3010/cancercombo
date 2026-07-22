@@ -75,14 +75,15 @@ def test_full_model_forward_and_backward(enable_dd_attn):
             assert not torch.isnan(param.grad).any(), f"Parameter {name} gradient is NaN!"
 
 
-def test_permutation_invariance():
+@parametrize("enable_dd_attn", [True, False])
+def test_permutation_invariance(enable_dd_attn):
     """Test that model output is permutation invariant when inputs are swapped."""
     config = ModelConfig(
         d_model=256, n_heads=4, d_ff=512, dropout=0.1,
         molformer_in_dim=768, morgan_in_dim=2048, descriptor_in_dim=200,
         cell_in_dim=976, use_pathway_projection=True, n_pathways=300,
         molformer_model_name="ibm/MoLFormer-XL-CIMA-100M", use_pretrained_molformer=False,
-        enable_drug_drug_attention=False, use_symmetric_fusion=True,
+        enable_drug_drug_attention=enable_dd_attn, use_symmetric_fusion=True,
         e_min=0.0, e_max=100.0, c_min=1e-6, c_max=1e3, h_min=0.1, h_max=10.0,
         alpha_min=1e-4, alpha_max=100.0
     )
@@ -252,7 +253,8 @@ def test_encoders_and_fusion_shapes():
 if __name__ == "__main__":
     test_full_model_forward_and_backward(False)
     test_full_model_forward_and_backward(True)
-    test_permutation_invariance()
+    test_permutation_invariance(False)
+    test_permutation_invariance(True)
     test_hill_solver_shapes()
     test_hill_solver_zero_dose_gradients()
     test_hill_solver_extreme_doses()

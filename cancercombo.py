@@ -7,8 +7,7 @@ from blocks.descriptor_encoder import DescriptorEncoder
 from blocks.fusion import AttentionMultiRepresentationFusion
 from blocks.cell_encoder import CellLineEncoder
 from blocks.drug_cell_attention import DrugCellCrossAttention
-# DISABLED: Drug–Drug Attention
-# from blocks.drug_drug_attention import DrugDrugCrossAttention
+from blocks.drug_drug_attention import DrugDrugCrossAttention
 from blocks.shared_feature import SymmetricComboFusion
 from blocks.prediction_heads import CancerComboPredictionHeads
 from blocks.hill_equation import BivariateHillSolver
@@ -61,12 +60,12 @@ class CancerCombo(nn.Module):
             n_heads=config.n_heads,
             dropout=config.dropout
         )
-        # DISABLED: Drug–Drug Attention
-        # self.drug_drug_attn = DrugDrugCrossAttention(
-        #     d_model=config.d_model,
-        #     n_heads=config.n_heads,
-        #     dropout=config.dropout
-        # )
+        # Drug–Drug Attention Layer
+        self.drug_drug_attn = DrugDrugCrossAttention(
+            d_model=config.d_model,
+            n_heads=config.n_heads,
+            dropout=config.dropout
+        )
         
         # Combo fusion mapping (permutation invariance)
         self.symmetric_fusion = SymmetricComboFusion(
@@ -135,12 +134,11 @@ class CancerCombo(nn.Module):
         cond_a = self.drug_cell_attn(fused_a, cell_features)
         cond_b = self.drug_cell_attn(fused_b, cell_features)
         
-        # Step 6: DISABLED: Drug–Drug Attention
-        # if self.config.enable_drug_drug_attention:
-        #     aware_a, aware_b = self.drug_drug_attn(cond_a, cond_b)
-        # else:
-        #     aware_a, aware_b = cond_a, cond_b
-        aware_a, aware_b = cond_a, cond_b
+        # Step 6: Drug–Drug Attention
+        if self.config.enable_drug_drug_attention:
+            aware_a, aware_b = self.drug_drug_attn(cond_a, cond_b)
+        else:
+            aware_a, aware_b = cond_a, cond_b
             
         # Step 7: Symmetric Combination Fusion (ensures permutation invariance)
         if self.config.use_symmetric_fusion:

@@ -46,12 +46,24 @@ class CancerComboLightningModule(pl.LightningModule):
         )
         
     def on_train_epoch_start(self):
-        max_epochs = getattr(self.trainer, "max_epochs", "?") if hasattr(self, "trainer") and self.trainer else "?"
-        print(f"\n--- Epoch [{self.current_epoch + 1}/{max_epochs}] Started ---")
+        pass
 
     def on_train_epoch_end(self):
         max_epochs = getattr(self.trainer, "max_epochs", "?") if hasattr(self, "trainer") and self.trainer else "?"
-        print(f"--- Epoch [{self.current_epoch + 1}/{max_epochs}] Completed ---")
+        metrics = getattr(self.trainer, "logged_metrics", {})
+        tr_loss = metrics.get("train_loss_epoch", metrics.get("train_loss_step", 0.0))
+        val_l = metrics.get("val_loss", 0.0)
+        val_r = metrics.get("val_rmse", 0.0)
+        val_p = metrics.get("val_pearson", 0.0)
+        val_s = metrics.get("val_spearman", 0.0)
+        
+        tr_val = f"{tr_loss:.4f}" if isinstance(tr_loss, (float, int)) or hasattr(tr_loss, "item") else str(tr_loss)
+        val_l_val = f"{val_l:.4f}" if isinstance(val_l, (float, int)) or hasattr(val_l, "item") else str(val_l)
+        val_r_val = f"{val_r:.4f}" if isinstance(val_r, (float, int)) or hasattr(val_r, "item") else str(val_r)
+        val_p_val = f"{val_p:.4f}" if isinstance(val_p, (float, int)) or hasattr(val_p, "item") else str(val_p)
+        val_s_val = f"{val_s:.4f}" if isinstance(val_s, (float, int)) or hasattr(val_s, "item") else str(val_s)
+        
+        print(f"\n--- Epoch [{self.current_epoch + 1}/{max_epochs}] Summary | Train Loss: {tr_val} | Val Loss: {val_l_val} | Val RMSE: {val_r_val} | Val Pearson: {val_p_val} | Val Spearman: {val_s_val} ---\n")
 
     def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         y_pred, params_pred = self(batch)
@@ -61,7 +73,9 @@ class CancerComboLightningModule(pl.LightningModule):
         params_true = {p: batch[p] for p in ["e1", "e2", "e3", "log_c1", "log_c2", "h1", "h2", "alpha"] if p in batch}
         
         loss = self.loss_fn(y_pred, y_true, params_pred=params_pred, params_true=params_true if params_true else None)
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=False)
+        self.log("train_loss_step", loss, on_step=True, on_epoch=False, prog_bar=True, sync_dist=False)
+        self.log("train_loss_epoch", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=False)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=False, sync_dist=False)
         return loss
         
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
