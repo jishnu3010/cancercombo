@@ -72,6 +72,15 @@ class Experimenter:
         else:
             self.logger.warning("PyTorch Lightning unavailable. Running native PyTorch ablation loop...")
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if device.type == "cuda":
+                self.logger.info("Configuring PyTorch CUDA settings...")
+                try:
+                    torch.backends.cuda.enable_flash_sdp(False)
+                    torch.backends.cuda.enable_mem_efficient_sdp(False)
+                    torch.backends.cuda.enable_math_sdp(True)
+                    self.logger.info("  [SUCCESS] Disabled FlashAttention and MemEfficient Attention SDP backends.")
+                except Exception as e:
+                    self.logger.warning(f"  [WARNING] Failed to configure SDPA kernels: {e}")
             net = CancerCombo(m_config).to(device)
             loss_fn = CancerComboLoss()
             optimizer = torch.optim.AdamW(net.parameters(), lr=t_config.lr, weight_decay=t_config.weight_decay)

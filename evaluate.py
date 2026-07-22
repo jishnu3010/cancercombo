@@ -86,6 +86,17 @@ def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", c
     m_config, _ = load_config(config_path)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
+    # Configure PyTorch CUDA backends to avoid hangs/deadlocks on GPU container setups
+    if device == "cuda":
+        logger.info("Configuring PyTorch CUDA settings...")
+        try:
+            torch.backends.cuda.enable_flash_sdp(False)
+            torch.backends.cuda.enable_mem_efficient_sdp(False)
+            torch.backends.cuda.enable_math_sdp(True)
+            logger.info("  [SUCCESS] Disabled FlashAttention and MemEfficient Attention SDP backends (preventing CUDA compiler & padding mask hangs).")
+        except Exception as e:
+            logger.warning(f"  [WARNING] Failed to configure SDPA kernels: {e}")
+    
     scenario_files = {
         1: "data/splits/scenario1_combination.csv",
         2: "data/splits/scenario2_cell.csv",

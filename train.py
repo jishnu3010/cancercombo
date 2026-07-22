@@ -50,6 +50,17 @@ def run_training(
         t_config.epochs = epochs
     set_seed(t_config.seed)
     
+    # Configure PyTorch CUDA backends to avoid hangs/deadlocks on GPU container setups
+    if torch.cuda.is_available():
+        logger.info("Configuring PyTorch CUDA settings...")
+        try:
+            torch.backends.cuda.enable_flash_sdp(False)
+            torch.backends.cuda.enable_mem_efficient_sdp(False)
+            torch.backends.cuda.enable_math_sdp(True)
+            logger.info("  [SUCCESS] Disabled FlashAttention and MemEfficient Attention SDP backends (preventing CUDA compiler & padding mask hangs).")
+        except Exception as e:
+            logger.warning(f"  [WARNING] Failed to configure SDPA kernels: {e}")
+    
     logger.info("Attempting to load real dataset archives...")
     real_gex = load_nci60_gex("data/features/NCI-60_landmark_gex.csv", target_dim=m_config.cell_in_dim)
     
@@ -97,7 +108,8 @@ def run_training(
     val_dataset = DrugComboDataset(val_data, cell_features, drug_feature_store=drug_features)
     
     num_workers = getattr(t_config, "num_workers", 0)
-    pin_mem = torch.cuda.is_available()
+    # Disable pin_memory by default to prevent Docker/Jupyter hub memory-lock (ulimit) deadlocks/slowdowns.
+    pin_mem = False
     
     loader_kwargs = {
         "batch_size": t_config.batch_size,
