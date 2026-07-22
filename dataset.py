@@ -423,7 +423,7 @@ class DrugComboDataset(Dataset):
         # Include optional Hill parameters for auxiliary supervision if present
         for p in ["e1", "e2", "e3", "log_c1", "log_c2", "h1", "h2", "alpha"]:
             if p in item:
-                res_dict[p] = torch.tensor([float(item[p])], dtype=torch.float32)
+                res_dict[p] = _to_tensor([float(item[p])], dtype=torch.float32)
                 
         return res_dict
 

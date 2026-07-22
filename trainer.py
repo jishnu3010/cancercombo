@@ -70,6 +70,9 @@ class CancerComboLightningModule(pl.LightningModule):
         })
         return loss
 
+    def on_validation_epoch_start(self):
+        self.validation_step_outputs.clear()
+
     def on_validation_epoch_end(self):
         if not self.validation_step_outputs:
             return
@@ -101,6 +104,9 @@ class CancerComboLightningModule(pl.LightningModule):
             "true": y_true.detach().cpu().numpy()
         })
         return loss
+
+    def on_test_epoch_start(self):
+        self.test_step_outputs.clear()
 
     def on_test_epoch_end(self):
         if not self.test_step_outputs:
