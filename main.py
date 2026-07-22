@@ -87,11 +87,29 @@ def main():
         choices=["auto", "lightning", "native"],
         help="Execution engine: native, lightning, or auto (default: native)"
     )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=None,
+        help="Override number of training epochs"
+    )
+    parser.add_argument(
+        "--max_samples",
+        type=int,
+        default=None,
+        help="Sub-sample dataset for fast debug or testing"
+    )
     
     args = parser.parse_args()
     
     if args.mode == "train":
-        run_training(config_path=args.config, scenario=args.scenario, engine=args.engine)
+        run_training(
+            config_path=args.config,
+            scenario=args.scenario,
+            engine=args.engine,
+            epochs=args.epochs,
+            max_samples=args.max_samples
+        )
     elif args.mode == "evaluate":
         run_evaluation(checkpoint_path=args.checkpoint, config_path=args.config, scenario=args.scenario)
     elif args.mode == "predict":
