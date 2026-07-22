@@ -150,19 +150,10 @@ class CancerCombo(nn.Module):
         # Step 8: Predict Pharmacological parameters
         e1, e2, e3, log_c1, log_c2, h1, h2, alpha = self.heads(aware_a, aware_b, z_combo)
         
-        # Step 9: Differentiable Hill Solver
-        y_pred = self.hill_solver(
-            doses_a=doses_a,
-            doses_b=doses_b,
-            e1=e1,
-            e2=e2,
-            e3=e3,
-            log_c1=log_c1,
-            log_c2=log_c2,
-            h1=h1,
-            h2=h2,
-            alpha=alpha
-        )
+        # DIAGNOSTIC EXPERIMENT: Bypass self.hill_solver to isolate solver backward pass deadlocks.
+        # Including all predicted parameters multiplied by 0.0 ensures every prediction head receives gradients.
+        params_sum = log_c1 + log_c2 + h1 + h2 + e3 + alpha
+        y_pred = e1.unsqueeze(-1) * doses_a.unsqueeze(-1) + e2.unsqueeze(-1) * doses_b.unsqueeze(1) + 0.0 * params_sum.unsqueeze(-1)
         
         params = (e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
         return y_pred, params

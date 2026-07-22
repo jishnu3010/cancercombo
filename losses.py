@@ -76,6 +76,23 @@ class CancerComboLoss(nn.Module):
             torch.Tensor: Scalar combined loss value.
         """
         loss_mse = self.mse(y_pred, y_true)
-        # DIAGNOSTIC EXPERIMENT: Return only loss_mse to isolate ranking loss autograd hang
-        return loss_mse
+        loss_rank = self._compute_ranking_loss(y_pred, y_true)
+        total_loss = loss_mse + self.rank_lambda * loss_rank
+        
+        # Auxiliary parameter supervision if ground truth Hill parameters are provided in batch
+        if params_pred is not None and params_true is not None:
+            param_names = ["e1", "e2", "e3", "log_c1", "log_c2", "h1", "h2", "alpha"]
+            loss_aux = 0.0
+            count = 0
+            for pred, name in zip(params_pred, param_names):
+                if name in params_true:
+                    target = params_true[name]
+                    if target.dim() == 1:
+                        target = target.unsqueeze(-1)
+                    loss_aux += self.smooth_l1(pred, target)
+                    count += 1
+            if count > 0:
+                total_loss += self.aux_lambda * (loss_aux / count)
+                
+        return total_loss
 
