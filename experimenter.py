@@ -77,7 +77,9 @@ class Experimenter:
             optimizer = torch.optim.AdamW(net.parameters(), lr=t_config.lr, weight_decay=t_config.weight_decay)
 
             for epoch in range(1, epochs + 1):
+                self.logger.info(f"--- Ablation Epoch [{epoch}/{epochs}] Started ---")
                 net.train()
+                train_loss_sum = 0.0
                 for batch in train_loader:
                     optimizer.zero_grad()
                     b_gpu = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
@@ -89,6 +91,9 @@ class Experimenter:
                     loss = loss_fn(y_pred, b_gpu["viability"], params)
                     loss.backward()
                     optimizer.step()
+                    train_loss_sum += loss.item()
+                avg_train_loss = train_loss_sum / max(len(train_loader), 1)
+                self.logger.info(f"--- Ablation Epoch [{epoch}/{epochs}] Finished | Avg Train Loss: {avg_train_loss:.4f} ---")
 
             net.eval()
             val_loss_sum = 0.0

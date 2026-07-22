@@ -153,6 +153,7 @@ def run_training(
         os.makedirs(t_config.checkpoint_dir, exist_ok=True)
         
         for epoch in range(1, t_config.epochs + 1):
+            logger.info(f"--- Epoch [{epoch}/{t_config.epochs}] Started ---")
             net.train()
             train_loss_sum = 0.0
             for batch_idx, batch in enumerate(train_loader):

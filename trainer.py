@@ -45,6 +45,14 @@ class CancerComboLightningModule(pl.LightningModule):
             doses_b=batch["doses_b"]
         )
         
+    def on_train_epoch_start(self):
+        max_epochs = getattr(self.trainer, "max_epochs", "?") if hasattr(self, "trainer") and self.trainer else "?"
+        print(f"\n--- Epoch [{self.current_epoch + 1}/{max_epochs}] Started ---")
+
+    def on_train_epoch_end(self):
+        max_epochs = getattr(self.trainer, "max_epochs", "?") if hasattr(self, "trainer") and self.trainer else "?"
+        print(f"--- Epoch [{self.current_epoch + 1}/{max_epochs}] Completed ---")
+
     def training_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         y_pred, params_pred = self(batch)
         y_true = batch["viability"]
