@@ -144,7 +144,10 @@ def run_training(
         loss_fn = CancerComboLoss()
         optimizer = torch.optim.AdamW(net.parameters(), lr=t_config.lr, weight_decay=t_config.weight_decay)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
-        scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
+        if hasattr(torch, "amp") and hasattr(torch.amp, "GradScaler"):
+            scaler = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda"))
+        else:
+            scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
         
         best_val_loss = float("inf")
         os.makedirs(t_config.checkpoint_dir, exist_ok=True)
@@ -155,7 +158,9 @@ def run_training(
             for batch_idx, batch in enumerate(train_loader):
                 optimizer.zero_grad()
                 b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-                with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                
+                autocast_ctx = torch.amp.autocast("cuda", enabled=(device.type == "cuda")) if hasattr(torch, "amp") and hasattr(torch.amp, "autocast") else torch.cuda.amp.autocast(enabled=(device.type == "cuda"))
+                with autocast_ctx:
                     y_pred, params = net(
                         b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
                         b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
@@ -181,7 +186,8 @@ def run_training(
             with torch.no_grad():
                 for batch in val_loader:
                     b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-                    with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                    autocast_ctx = torch.amp.autocast("cuda", enabled=(device.type == "cuda")) if hasattr(torch, "amp") and hasattr(torch.amp, "autocast") else torch.cuda.amp.autocast(enabled=(device.type == "cuda"))
+                    with autocast_ctx:
                         y_pred, params = net(
                             b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
                             b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
