@@ -53,7 +53,7 @@ class CancerComboLightningModule(pl.LightningModule):
         params_true = {p: batch[p] for p in ["e1", "e2", "e3", "log_c1", "log_c2", "h1", "h2", "alpha"] if p in batch}
         
         loss = self.loss_fn(y_pred, y_true, params_pred=params_pred, params_true=params_true if params_true else None)
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=False)
         return loss
         
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
@@ -62,7 +62,7 @@ class CancerComboLightningModule(pl.LightningModule):
         
         params_true = {p: batch[p] for p in ["e1", "e2", "e3", "log_c1", "log_c2", "h1", "h2", "alpha"] if p in batch}
         loss = self.loss_fn(y_pred, y_true, params_pred=params_pred, params_true=params_true if params_true else None)
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=False)
         
         self.validation_step_outputs.append({
             "pred": y_pred.detach().cpu().numpy(),
@@ -81,14 +81,14 @@ class CancerComboLightningModule(pl.LightningModule):
         trues = np.concatenate([x["true"] for x in self.validation_step_outputs], axis=0)
         
         metrics = calculate_metrics(preds, trues)
-        self.log("val_rmse", metrics["rmse"], prog_bar=True, sync_dist=True)
-        self.log("val_mae", metrics["mae"], prog_bar=False, sync_dist=True)
-        self.log("val_r2", metrics["r2"], prog_bar=False, sync_dist=True)
-        self.log("val_pearson", metrics["pearson"], prog_bar=True, sync_dist=True)
-        self.log("val_spearman", metrics["spearman"], prog_bar=True, sync_dist=True)
-        self.log("val_top_k_precision", metrics["top_k_precision"], prog_bar=False, sync_dist=True)
-        self.log("val_top_k_recall", metrics["top_k_recall"], prog_bar=False, sync_dist=True)
-        self.log("val_top_k_hit_rate", metrics["top_k_hit_rate"], prog_bar=False, sync_dist=True)
+        self.log("val_rmse", metrics["rmse"], prog_bar=True, sync_dist=False)
+        self.log("val_mae", metrics["mae"], prog_bar=False, sync_dist=False)
+        self.log("val_r2", metrics["r2"], prog_bar=False, sync_dist=False)
+        self.log("val_pearson", metrics["pearson"], prog_bar=True, sync_dist=False)
+        self.log("val_spearman", metrics["spearman"], prog_bar=True, sync_dist=False)
+        self.log("val_top_k_precision", metrics["top_k_precision"], prog_bar=False, sync_dist=False)
+        self.log("val_top_k_recall", metrics["top_k_recall"], prog_bar=False, sync_dist=False)
+        self.log("val_top_k_hit_rate", metrics["top_k_hit_rate"], prog_bar=False, sync_dist=False)
         
         self.validation_step_outputs.clear()
         
@@ -97,7 +97,7 @@ class CancerComboLightningModule(pl.LightningModule):
         y_true = batch["viability"]
         
         loss = self.loss_fn(y_pred, y_true)
-        self.log("test_loss", loss, sync_dist=True)
+        self.log("test_loss", loss, sync_dist=False)
         
         self.test_step_outputs.append({
             "pred": y_pred.detach().cpu().numpy(),
@@ -116,9 +116,9 @@ class CancerComboLightningModule(pl.LightningModule):
         trues = np.concatenate([x["true"] for x in self.test_step_outputs], axis=0)
         
         metrics = calculate_metrics(preds, trues)
-        self.log("test_rmse", metrics["rmse"], sync_dist=True)
-        self.log("test_pearson", metrics["pearson"], sync_dist=True)
-        self.log("test_spearman", metrics["spearman"], sync_dist=True)
+        self.log("test_rmse", metrics["rmse"], sync_dist=False)
+        self.log("test_pearson", metrics["pearson"], sync_dist=False)
+        self.log("test_spearman", metrics["spearman"], sync_dist=False)
         
         self.test_step_outputs.clear()
         

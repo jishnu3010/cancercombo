@@ -90,6 +90,8 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
     val_dataset = DrugComboDataset(val_data, cell_features, drug_feature_store=drug_features)
     
     num_workers = getattr(t_config, "num_workers", 0)
+    if num_workers == 0 and os.name != 'nt':
+        num_workers = min(os.cpu_count() or 2, 4)
     pin_mem = torch.cuda.is_available()
     
     loader_kwargs = {
@@ -117,15 +119,21 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
             mode="min"
         )
         logger.info(f"Starting trainer fit on {accelerator.upper()} for {t_config.epochs} epochs...")
-        trainer = pl.Trainer(
-            max_epochs=t_config.epochs,
-            accelerator=accelerator,
-            devices=1,
-            gradient_clip_val=5.0,
-            callbacks=[checkpoint_callback],
-            enable_checkpointing=True,
-            log_every_n_steps=1
-        )
+        trainer_kwargs = {
+            "max_epochs": t_config.epochs,
+            "accelerator": accelerator,
+            "devices": 1,
+            "gradient_clip_val": 5.0,
+            "callbacks": [checkpoint_callback],
+            "enable_checkpointing": True,
+            "log_every_n_steps": 50
+        }
+        if accelerator == "gpu":
+            if hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported():
+                trainer_kwargs["precision"] = "bf16-mixed"
+            else:
+                trainer_kwargs["precision"] = "16-mixed"
+        trainer = pl.Trainer(**trainer_kwargs)
         trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
     else:
         logger.info(f"PyTorch Lightning not found. Starting Native PyTorch training loop on {accelerator.upper()} for {t_config.epochs} epochs...")

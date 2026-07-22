@@ -12,7 +12,7 @@ from typing import List, Dict, Tuple, Any, Optional
 
 def _to_tensor(x: Any, dtype: torch.dtype) -> torch.Tensor:
     if isinstance(x, torch.Tensor):
-        return x.detach().clone().to(dtype)
+        return x.to(dtype) if x.dtype != dtype else x
     return torch.tensor(x, dtype=dtype)
 
 SMILES_REGEX = r"(\[[^\]]+\]|Br|Cl|Si|Se|B|C|N|O|P|S|F|I|b|c|n|o|p|s|==|#|%[0-9]{2}|[0-9]|\+|-|=|/|\\|\@|\.|\(|\)|~|\*)"
