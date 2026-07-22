@@ -175,7 +175,7 @@ def run_training(
                 scaler.update()
                 train_loss_sum += loss.item()
                 
-                if (batch_idx + 1) % 50 == 0 or (batch_idx + 1) == len(train_loader):
+                if (batch_idx + 1) == 1 or (batch_idx + 1) % 50 == 0 or (batch_idx + 1) == len(train_loader):
                     logger.info(f"Epoch [{epoch}/{t_config.epochs}] | Step [{batch_idx + 1}/{len(train_loader)}] | Train Batch Loss: {loss.item():.4f}")
                 
             train_loss = train_loss_sum / max(len(train_loader), 1)
