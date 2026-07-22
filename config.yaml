@@ -11,7 +11,7 @@ model:
   n_pathways: 300
   molformer_model_name: "ibm/MoLFormer-XL-CIMA-100M"
   use_pretrained_molformer: false
-  enable_drug_drug_attention: true
+  enable_drug_drug_attention: false
   use_symmetric_fusion: true
   e_min: 0.0
   e_max: 100.0
