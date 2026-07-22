@@ -1,9 +1,30 @@
 import os
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
-os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+import ctypes
+
+def enforce_single_thread() -> None:
+    """Forces all BLAS, OpenMP, MKL, and PyTorch execution threads to 1
+    to prevent thread resource exhaustion (pthread_create failed) in constrained environments.
+    """
+    for key in ["OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"]:
+        os.environ[key] = "1"
+
+    for libname in ["libopenblas.so", "libopenblas.so.0", "libblas.so", "libmkl_rt.so", "libgomp.so.1"]:
+        try:
+            lib = ctypes.CDLL(libname)
+            if hasattr(lib, "openblas_set_num_threads"):
+                lib.openblas_set_num_threads(1)
+            if hasattr(lib, "mkl_set_num_threads"):
+                lib.mkl_set_num_threads(1)
+        except Exception:
+            pass
+
+    try:
+        from threadpoolctl import threadpool_limits
+        threadpool_limits(limits=1)
+    except Exception:
+        pass
+
+enforce_single_thread()
 
 import torch
 import numpy as np
