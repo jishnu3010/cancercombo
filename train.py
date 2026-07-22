@@ -26,7 +26,13 @@ from logger import setup_logger
 
 import argparse
 
-def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None, max_samples: Optional[int] = None, scenario: int = 1):
+def run_training(
+    config_path: str = "config.yaml",
+    epochs: Optional[int] = None,
+    max_samples: Optional[int] = None,
+    scenario: int = 1,
+    engine: str = "auto"
+):
     """Initializes dataset generators and executes full model training.
 
     Args:
@@ -34,6 +40,7 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
         epochs: Optional epoch override.
         max_samples: Optional maximum dataset samples limit.
         scenario: The split scenario to use (1, 2, or 3).
+        engine: Execution engine: 'auto', 'lightning', or 'native'.
     """
     logger = setup_logger("CancerCombo Train")
     logger.info("Loading configs and setting seed...")
@@ -90,8 +97,6 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
     val_dataset = DrugComboDataset(val_data, cell_features, drug_feature_store=drug_features)
     
     num_workers = getattr(t_config, "num_workers", 0)
-    if num_workers == 0 and os.name != 'nt':
-        num_workers = min(os.cpu_count() or 2, 4)
     pin_mem = torch.cuda.is_available()
     
     loader_kwargs = {
@@ -107,8 +112,9 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
     val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
     
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
+    use_lightning = (engine == "lightning") or (engine == "auto" and pl is not None)
     
-    if pl is not None:
+    if use_lightning:
         logger.info("Initializing LightningModule...")
         model = CancerComboLightningModule(m_config, t_config)
         checkpoint_callback = ModelCheckpoint(
@@ -118,7 +124,7 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
             monitor="val_loss",
             mode="min"
         )
-        logger.info(f"Starting trainer fit on {accelerator.upper()} for {t_config.epochs} epochs...")
+        logger.info(f"Starting PyTorch Lightning trainer fit on {accelerator.upper()} for {t_config.epochs} epochs...")
         trainer_kwargs = {
             "max_epochs": t_config.epochs,
             "accelerator": accelerator,
@@ -136,12 +142,14 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
         trainer = pl.Trainer(**trainer_kwargs)
         trainer.fit(model, train_dataloaders=train_loader, val_dataloaders=val_loader)
     else:
-        logger.info(f"PyTorch Lightning not found. Starting Native PyTorch training loop on {accelerator.upper()} for {t_config.epochs} epochs...")
+        logger.info(f"Starting Native PyTorch Training Engine on {accelerator.upper()} for {t_config.epochs} epochs...")
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         net = CancerCombo(m_config).to(device)
         loss_fn = CancerComboLoss()
         optimizer = torch.optim.AdamW(net.parameters(), lr=t_config.lr, weight_decay=t_config.weight_decay)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
+        scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
+        
         best_val_loss = float("inf")
         os.makedirs(t_config.checkpoint_dir, exist_ok=True)
         
@@ -150,17 +158,24 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
             train_loss_sum = 0.0
             for batch_idx, batch in enumerate(train_loader):
                 optimizer.zero_grad()
-                b_gpu = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-                y_pred, params = net(
-                    b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
-                    b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
-                    b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
-                )
-                loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
-                loss.backward()
+                b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+                with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                    y_pred, params = net(
+                        b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
+                        b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
+                        b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
+                    )
+                    loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
+                
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=5.0)
-                optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
                 train_loss_sum += loss.item()
+                
+                if (batch_idx + 1) % 50 == 0 or (batch_idx + 1) == len(train_loader):
+                    logger.info(f"Epoch [{epoch}/{t_config.epochs}] | Step [{batch_idx + 1}/{len(train_loader)}] | Train Batch Loss: {loss.item():.4f}")
                 
             train_loss = train_loss_sum / max(len(train_loader), 1)
             
@@ -169,19 +184,20 @@ def run_training(config_path: str = "config.yaml", epochs: Optional[int] = None,
             val_loss_sum = 0.0
             with torch.no_grad():
                 for batch in val_loader:
-                    b_gpu = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-                    y_pred, params = net(
-                        b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
-                        b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
-                        b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
-                    )
-                    v_loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
+                    b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+                    with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
+                        y_pred, params = net(
+                            b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
+                            b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
+                            b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
+                        )
+                        v_loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
                     val_loss_sum += v_loss.item()
                     
             val_loss = val_loss_sum / max(len(val_loader), 1)
             scheduler.step(val_loss)
             
-            logger.info(f"Epoch [{epoch}/{t_config.epochs}] | Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}")
+            logger.info(f"Epoch [{epoch}/{t_config.epochs}] Complete | Avg Train Loss: {train_loss:.6f} | Val Loss: {val_loss:.6f}")
             
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -197,11 +213,13 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument("--scenario", type=int, default=1, help="Split scenario (1, 2, or 3)")
+    parser.add_argument("--engine", type=str, default="auto", choices=["auto", "lightning", "native"], help="Training engine: auto, lightning, or native")
     args = parser.parse_args()
     
     run_training(
         config_path=args.config,
         epochs=args.epochs,
         max_samples=args.max_samples,
-        scenario=args.scenario
+        scenario=args.scenario,
+        engine=args.engine
     )

@@ -80,11 +80,18 @@ def main():
         choices=[1, 2, 3],
         help="Scenario split number: 1 (combination-wise), 2 (cell-wise), or 3 (drug-wise) (default: 1)"
     )
+    parser.add_argument(
+        "--engine",
+        type=str,
+        default="auto",
+        choices=["auto", "lightning", "native"],
+        help="Execution engine: auto, lightning, or native (default: auto)"
+    )
     
     args = parser.parse_args()
     
     if args.mode == "train":
-        run_training(config_path=args.config, scenario=args.scenario)
+        run_training(config_path=args.config, scenario=args.scenario, engine=args.engine)
     elif args.mode == "evaluate":
         run_evaluation(checkpoint_path=args.checkpoint, config_path=args.config, scenario=args.scenario)
     elif args.mode == "predict":
