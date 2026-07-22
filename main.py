@@ -1,3 +1,10 @@
+import os
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 import argparse
 import torch
 import sys
@@ -7,7 +14,6 @@ from predictor import SynergyPredictor
 from config import load_config
 from helpers import generate_mock_data
 from logger import setup_logger
-import os
 import numpy as np
 
 def run_prediction_cli(checkpoint_path: str):
