@@ -61,26 +61,6 @@ class CancerCombo(nn.Module):
 
     def forward(
         self,
-<<<<<<< HEAD
-        drug_a_ids: torch.Tensor,
-        drug_a_mask: torch.Tensor,
-        drug_a_morgan: torch.Tensor,
-        drug_a_desc: torch.Tensor,
-        drug_b_ids: torch.Tensor,
-        drug_b_mask: torch.Tensor,
-        drug_b_morgan: torch.Tensor,
-        drug_b_desc: torch.Tensor,
-        cell_line: torch.Tensor,
-        doses_a: torch.Tensor,
-        doses_b: torch.Tensor
-    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, ...]]:
-        """Runs complete combination prediction forward pass."""
-        
-        # Step 1: Encode Drug A chemical representations
-        seq_a, pooled_a = self.molformer_enc(drug_a_ids, drug_a_mask)
-        morgan_a = self.morgan_enc(drug_a_morgan)
-        desc_a = self.descriptor_enc(drug_a_desc)
-=======
         drug_a_ids, drug_a_mask, drug_a_morgan, drug_a_desc,
         drug_b_ids, drug_b_mask, drug_b_morgan, drug_b_desc,
         cell_line, doses_a, doses_b
@@ -90,7 +70,6 @@ class CancerCombo(nn.Module):
         # For now, assuming pooled_a is available. If not, replace this block with your actual MolFormer output.
         pooled_a = torch.zeros(drug_a_morgan.size(0), self.config.d_model, device=drug_a_morgan.device)
         pooled_b = torch.zeros(drug_b_morgan.size(0), self.config.d_model, device=drug_b_morgan.device)
->>>>>>> 2220a61 (From DGX)
         
         # 2. Encode & Fuse Drug A
         morgan_a = self.morgan_proj(drug_a_morgan)
@@ -105,23 +84,6 @@ class CancerCombo(nn.Module):
         # 4. Encode Cell Line
         cell_features = self.cell_enc(cell_line)
         
-<<<<<<< HEAD
-        # --- THE FIX ---
-        # Step 5 & 6: Drug-Cell Cross Attention & Drug-Drug Attention
-        # We wrap these in sdp_kernel to force PyTorch to use the standard Math backend.
-        # This prevents A100 GPUs from hanging infinitely during backward passes on sequence length 1.
-        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True):
-            # Step 5
-            cond_a = self.drug_cell_attn(fused_a, cell_features)
-            cond_b = self.drug_cell_attn(fused_b, cell_features)
-            
-            # Step 6
-            if self.config.enable_drug_drug_attention:
-                aware_a, aware_b = self.drug_drug_attn(cond_a, cond_b)
-            else:
-                aware_a, aware_b = cond_a, cond_b
-        # ---------------
-=======
         # 5. Drug-Cell Interaction
         cond_a = self.drug_cell_fusion(torch.cat([fused_a, cell_features], dim=-1))
         cond_b = self.drug_cell_fusion(torch.cat([fused_b, cell_features], dim=-1))
@@ -148,7 +110,6 @@ class CancerCombo(nn.Module):
         
         if log_x1.dim() == 2: log_x1 = log_x1.unsqueeze(-1)
         if log_x2.dim() == 2: log_x2 = log_x2.unsqueeze(1)
->>>>>>> 2220a61 (From DGX)
             
         exp_A = log_c1_u * h1_u + log_c2_u * h2_u
         exp_B = log_x1 * h1_u + log_c2_u * h2_u

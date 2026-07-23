@@ -1,0 +1,37 @@
+model_config: !!python/object:config.ModelConfig
+  alpha_max: 100.0
+  alpha_min: 0.0001
+  c_max: 1000.0
+  c_min: 1.0e-06
+  cell_in_dim: 976
+  d_ff: 512
+  d_model: 256
+  descriptor_in_dim: 200
+  dropout: 0.1
+  e_max: 100.0
+  e_min: 0.0
+  enable_drug_drug_attention: false
+  h_max: 10.0
+  h_min: 0.1
+  molformer_in_dim: 768
+  molformer_model_name: ibm/MoLFormer-XL-CIMA-100M
+  morgan_in_dim: 2048
+  n_heads: 4
+  n_pathways: 300
+  use_pathway_projection: true
+  use_pretrained_molformer: false
+  use_symmetric_fusion: true
+training_config: !!python/object:config.TrainingConfig
+  batch_size: 128
+  checkpoint_dir: checkpoints
+  device: cuda
+  epochs: 100
+  lr: 0.0001
+  num_workers: 0
+  optimizer_name: AdamW
+  save_top_k: 3
+  scheduler_factor: 0.5
+  scheduler_name: ReduceLROnPlateau
+  scheduler_patience: 3
+  seed: 42
+  weight_decay: 1.0e-05
