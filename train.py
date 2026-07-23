@@ -8,6 +8,8 @@ enforce_single_thread()
 import torch
 from torch.utils.data import DataLoader
 torch.autograd.set_detect_anomaly(True)
+torch.backends.cudnn.enabled = False
+torch.backends.cudnn.benchmark = False
 try:
     import pytorch_lightning as pl  # type: ignore # pyrefly: ignore [missing-import]
     from pytorch_lightning.callbacks import ModelCheckpoint  # type: ignore # pyrefly: ignore [missing-import]
