@@ -63,25 +63,35 @@ def _register_backward_debug_hooks(net: torch.nn.Module, logger):
 
         handles.append(module.register_forward_hook(_forward_hook))
 
-    target_modules = [
-        (net.molformer_enc, "molformer_enc"),
-        (net.molformer_enc.transformer, "molformer_enc.transformer"),
-        (net.molformer_enc.transformer.layers[0], "molformer_enc.transformer.layers[0]"),
-        (net.molformer_enc.transformer.layers[0].self_attn, "molformer_enc.transformer.layers[0].self_attn"),
-        (net.molformer_enc.transformer.layers[1], "molformer_enc.transformer.layers[1]"),
-        (net.molformer_enc.transformer.layers[1].self_attn, "molformer_enc.transformer.layers[1].self_attn"),
-        (net.fusion, "fusion"),
-        (net.fusion.self_attn, "fusion.self_attn"),
-        (net.cell_enc, "cell_enc"),
-        (net.drug_cell_attn, "drug_cell_attn"),
-        (net.drug_cell_attn.cross_attn, "drug_cell_attn.cross_attn"),
-        (net.symmetric_fusion, "symmetric_fusion"),
-        (net.heads, "heads"),
-        (net.hill_solver, "hill_solver"),
+    target_module_names = [
+        "molformer_enc",
+        "molformer_enc.transformer",
+        "molformer_enc.transformer.layers.0",
+        "molformer_enc.transformer.layers.0.self_attn",
+        "molformer_enc.transformer.layers.1",
+        "molformer_enc.transformer.layers.1.self_attn",
+        "fusion",
+        "fusion.self_attn",
+        "cell_enc",
+        "drug_cell_attn",
+        "drug_cell_attn.cross_attn",
+        "symmetric_fusion",
+        "heads",
+        "hill_solver",
     ]
 
-    for module, name in target_modules:
-        attach_output_hooks(module, name)
+    for name in target_module_names:
+        try:
+            mod = net
+            for part in name.split('.'):
+                if part.isdigit():
+                    mod = mod[int(part)]
+                else:
+                    mod = getattr(mod, part)
+            attach_output_hooks(mod, name)
+        except (AttributeError, IndexError):
+            logger.debug(f"[BACKWARD DEBUG] Module {name} not found in model architecture, skipping hook registration.")
+            continue
 
     logger.info("[BACKWARD DEBUG] Registered gradient hooks for the main backward path.")
     return handles
@@ -197,7 +207,12 @@ def run_training(
     )
     
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
-    use_lightning = (engine == "lightning" or (engine == "auto" and pl is not None and hasattr(pl, "Trainer")))
+    
+    if engine == "lightning" and pl is None:
+        logger.warning("PyTorch Lightning is not installed but '--engine lightning' was requested. Falling back to native PyTorch engine.")
+        use_lightning = False
+    else:
+        use_lightning = (engine == "lightning" or (engine == "auto" and pl is not None and hasattr(pl, "Trainer")))
     
     if use_lightning:
         logger.info("Initializing LightningModule...")
@@ -267,6 +282,11 @@ def run_training(
                     if epoch == 1 and batch_idx == 0:
                         logger.info("DEBUG [Batch 0]: Transferring inputs to GPU...")
                     b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+                    
+                    target = b_gpu.get("viability", b_gpu.get("viability_matrix"))
+                    if target is None:
+                        logger.warning(f"Batch {batch_idx} is missing target keys (viability/viability_matrix). Skipping.")
+                        continue
 
                     if epoch == 1 and batch_idx == 0:
                         logger.info("DEBUG [Batch 0]: Running model forward pass...")
@@ -278,7 +298,7 @@ def run_training(
 
                     if epoch == 1 and batch_idx == 0:
                         logger.info("DEBUG [Batch 0]: Computing CancerCombo loss...")
-                    loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
+                    loss = loss_fn(y_pred, target, params)
 
                     if debug_backprop and epoch == 1 and batch_idx == 0:
                         logger.info(
@@ -314,23 +334,31 @@ def run_training(
                     for batch_idx_val, batch in enumerate(val_loader):
                         if epoch == 1 and batch_idx_val == 0:
                             logger.info("DEBUG [Val Batch 0]: Starting first validation step...")
+                        
                         b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+                        target_val = b_gpu.get("viability", b_gpu.get("viability_matrix"))
+                        if target_val is None:
+                            logger.warning(f"Val Batch {batch_idx_val} is missing target keys. Skipping.")
+                            continue
+
                         y_pred, params = net(
                             b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
                             b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
                             b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
                         )
-                        v_loss = loss_fn(y_pred, b_gpu.get("viability", b_gpu.get("viability_matrix")), params)
+                        
+                        v_loss = loss_fn(y_pred, target_val, params)
                         val_loss_sum += v_loss.item()
                         val_preds_list.append(y_pred.detach().cpu().numpy())
-                        val_trues_list.append(b_gpu.get("viability", b_gpu.get("viability_matrix")).detach().cpu().numpy())
+                        val_trues_list.append(target_val.detach().cpu().numpy())
 
                 val_loss = val_loss_sum / max(len(val_loader), 1)
                 scheduler.step(val_loss)
 
                 if val_preds_list:
-                    v_preds = np.concatenate(val_preds_list, axis=0)
-                    v_trues = np.concatenate(val_trues_list, axis=0)
+                    # Flatten arrays before metric calculation to avoid shape mismatch broadcasting errors
+                    v_preds = np.concatenate(val_preds_list, axis=0).flatten()
+                    v_trues = np.concatenate(val_trues_list, axis=0).flatten()
                     val_metrics = calculate_metrics(v_preds, v_trues)
                     v_rmse = val_metrics["rmse"]
                     v_pearson = val_metrics["pearson"]
