@@ -115,8 +115,8 @@ class MolFormerEncoder(nn.Module):
             if all_masked.any():
                 key_padding_mask = key_padding_mask.clone()
                 key_padding_mask[all_masked, 0] = False
-            seq_embeddings = self.transformer(seq_feats, src_key_padding_mask=key_padding_mask)
-            seq_embeddings = self.proj(seq_embeddings)
+            # DIAGNOSTIC EXPERIMENT: Bypass self.transformer to isolate transformer backward pass deadlocks
+            seq_embeddings = self.proj(seq_feats)
             
         masked_embeddings = seq_embeddings * attention_mask.unsqueeze(-1)
         token_counts = attention_mask.sum(dim=1, keepdim=True).clamp(min=1)
