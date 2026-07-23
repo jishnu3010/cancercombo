@@ -95,24 +95,8 @@ class CancerCombo(nn.Module):
         doses_a: torch.Tensor,
         doses_b: torch.Tensor
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, ...]]:
-        """Runs complete combination prediction forward pass.
-
-        Args:
-            drug_a_ids: Drug A token IDs (B, L).
-            drug_a_mask: Drug A mask (B, L).
-            drug_a_morgan: Drug A fingerprints (B, morgan_in_dim).
-            drug_a_desc: Drug A physical descriptors (B, descriptor_in_dim).
-            drug_b_ids: Drug B token IDs (B, L).
-            drug_b_mask: Drug B mask (B, L).
-            drug_b_morgan: Drug B fingerprints (B, morgan_in_dim).
-            drug_b_desc: Drug B physical descriptors (B, descriptor_in_dim).
-            cell_line: Cell line expressions (B, cell_in_dim).
-            doses_a: Doses grid for drug A (B, M).
-            doses_b: Doses grid for drug B (B, N).
-
-        Returns:
-            Tuple[torch.Tensor, Tuple[torch.Tensor, ...]]: Viability predicted matrix and parameter tuple.
-        """
+        """Runs complete combination prediction forward pass."""
+        
         # Step 1: Encode Drug A chemical representations
         seq_a, pooled_a = self.molformer_enc(drug_a_ids, drug_a_mask)
         morgan_a = self.morgan_enc(drug_a_morgan)
@@ -130,15 +114,21 @@ class CancerCombo(nn.Module):
         # Step 4: Encode Cell line profile
         cell_features = self.cell_enc(cell_line)
         
-        # Step 5: Drug-Cell Cross Attention
-        cond_a = self.drug_cell_attn(fused_a, cell_features)
-        cond_b = self.drug_cell_attn(fused_b, cell_features)
-        
-        # Step 6: Drug–Drug Attention
-        if self.config.enable_drug_drug_attention:
-            aware_a, aware_b = self.drug_drug_attn(cond_a, cond_b)
-        else:
-            aware_a, aware_b = cond_a, cond_b
+        # --- THE FIX ---
+        # Step 5 & 6: Drug-Cell Cross Attention & Drug-Drug Attention
+        # We wrap these in sdp_kernel to force PyTorch to use the standard Math backend.
+        # This prevents A100 GPUs from hanging infinitely during backward passes on sequence length 1.
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True):
+            # Step 5
+            cond_a = self.drug_cell_attn(fused_a, cell_features)
+            cond_b = self.drug_cell_attn(fused_b, cell_features)
+            
+            # Step 6
+            if self.config.enable_drug_drug_attention:
+                aware_a, aware_b = self.drug_drug_attn(cond_a, cond_b)
+            else:
+                aware_a, aware_b = cond_a, cond_b
+        # ---------------
             
         # Step 7: Symmetric Combination Fusion (ensures permutation invariance)
         if self.config.use_symmetric_fusion:
