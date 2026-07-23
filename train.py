@@ -7,6 +7,7 @@ enforce_single_thread()
 
 import torch
 from torch.utils.data import DataLoader
+torch.autograd.set_detect_anomaly(True)
 try:
     import pytorch_lightning as pl  # type: ignore # pyrefly: ignore [missing-import]
     from pytorch_lightning.callbacks import ModelCheckpoint  # type: ignore # pyrefly: ignore [missing-import]
