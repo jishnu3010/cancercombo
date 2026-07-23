@@ -6,7 +6,7 @@
 
 ## 🌟 Key Architectural Features
 
-- **Multi-Modal Drug Representations**: Combines HuggingFace MoLFormer sequence Transformer embeddings, 2048-bit RDKit Morgan fingerprints, and 200 physical descriptors via Multi-Head Self-Attention Fusion.
+- **Multi-Model Drug Representations**: Combines HuggingFace MoLFormer sequence Transformer embeddings, 2048-bit RDKit Morgan fingerprints, and 200 physical descriptors via Multi-Head Self-Attention Fusion.
 - **Drug-Cell Cross-Attention**: Conditions drug representations on cell-line transcriptomics pathway tokens.
 - **Permutation Invariance**: Enforces mathematical symmetry $f(\text{Drug}_A, \text{Drug}_B) = f(\text{Drug}_B, \text{Drug}_A)$ via symmetric combination pooling.
 - **Differentiable Bivariate Hill Equation**: Predicts 8 log-space pharmacological parameters ($\log C_1, \log C_2, E_1, E_2, E_3, h_1, h_2, \alpha$) to reconstruct smooth 2D viability surfaces with autograd backpropagation.
