@@ -354,10 +354,8 @@ def run_training(
                         b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
                     )
 
-                    loss = loss_fn(y_pred, target, params)
+                    loss.backward()
 
-                    with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True):
-                        loss.backward()
 
                     # Task 3: Gradient Diagnostics (global norm, total params, % params with grad, % zero grads)
                     grads = [p.grad.detach() for p in net.parameters() if p.requires_grad and p.grad is not None]
