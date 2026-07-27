@@ -341,20 +341,40 @@ class DrugComboDataset(Dataset):
         data_list: List[Dict[str, Any]],
         cell_line_features: Dict[str, np.ndarray],
         drug_feature_store: Dict[str, Dict[str, Any]] | None = None,
-        max_smiles_len: int = 128
+        max_smiles_len: int = 128,
+        use_pretrained_molformer: bool = False,
+        molformer_model_name: str = "ibm/MoLFormer-XL-CIMA-100M"
     ):
         """
         Args:
             data_list: List of dictionaries of samples.
             cell_line_features: Dictionary mapping cell line name to expression vector.
             max_smiles_len: Maximum token sequence length.
+            use_pretrained_molformer: Whether to use HuggingFace pretrained MoLFormer tokenizer.
+            molformer_model_name: Pretrained HuggingFace MoLFormer model identifier.
         """
         self.data = data_list
         self.cell_line_features = cell_line_features
         self.drug_feature_store = drug_feature_store or {}
+        self.max_smiles_len = max_smiles_len
         self.tokenizer = SMILESTokenizer(max_len=max_smiles_len)
         self.preprocessor = MolecularPreprocessor()
+        self.use_pretrained_molformer = use_pretrained_molformer
+        self.hf_tokenizer = None
+        if self.use_pretrained_molformer:
+            try:
+                from transformers import AutoTokenizer
+                self.hf_tokenizer = AutoTokenizer.from_pretrained(molformer_model_name, trust_remote_code=True)
+            except Exception as e:
+                print(f"Warning: Failed to load pretrained HF AutoTokenizer for '{molformer_model_name}': {e}. Falling back to custom SMILESTokenizer.")
+                self.use_pretrained_molformer = False
         self._dynamic_cache = {} # Thread-safe cache for dynamic feature generation
+
+    def _tokenize_smiles(self, smiles: str) -> Tuple[List[int], List[int]]:
+        if self.use_pretrained_molformer and self.hf_tokenizer is not None:
+            encoded = self.hf_tokenizer(smiles, max_length=self.max_smiles_len, padding="max_length", truncation=True)
+            return encoded["input_ids"], encoded["attention_mask"]
+        return self.tokenizer.tokenize(smiles)
         
     def __len__(self) -> int:
         return len(self.data)
@@ -380,7 +400,7 @@ class DrugComboDataset(Dataset):
         else:
             if smiles_a not in self._dynamic_cache:
                 m_a, d_a, _ = self.preprocessor.process_smiles(smiles_a)
-                i_a, mk_a = self.tokenizer.tokenize(smiles_a)
+                i_a, mk_a = self._tokenize_smiles(smiles_a)
                 self._dynamic_cache[smiles_a] = (m_a, d_a, i_a, mk_a)
             morgan_a, desc_a, ids_a, mask_a = self._dynamic_cache[smiles_a]
 
@@ -392,9 +412,10 @@ class DrugComboDataset(Dataset):
         else:
             if smiles_b not in self._dynamic_cache:
                 m_b, d_b, _ = self.preprocessor.process_smiles(smiles_b)
-                i_b, mk_b = self.tokenizer.tokenize(smiles_b)
+                i_b, mk_b = self._tokenize_smiles(smiles_b)
                 self._dynamic_cache[smiles_b] = (m_b, d_b, i_b, mk_b)
             morgan_b, desc_b, ids_b, mask_b = self._dynamic_cache[smiles_b]
+
         
         # Get biological profile
         norm_cell = re.sub(r'[^A-Z0-9]', '', str(cell_name).upper())

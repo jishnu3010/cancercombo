@@ -168,8 +168,13 @@ if __name__ == "__main__":
     
     ckpt_path = args.checkpoint
     if not os.path.exists(ckpt_path):
-        if os.path.exists("checkpoints"):
-            files = [f for f in os.listdir("checkpoints") if f.endswith(".ckpt")]
-            if files:
-                ckpt_path = os.path.join("checkpoints", files[0])
+        alt_path = os.path.join("checkpoints", "cancercombo_best.ckpt")
+        if os.path.exists(alt_path):
+            ckpt_path = alt_path
+        else:
+            print(f"Error: Specified checkpoint '{ckpt_path}' and default best checkpoint '{alt_path}' do not exist.")
+            print("Please train a model first or specify a valid checkpoint path via '--checkpoint'.")
+            import sys
+            sys.exit(1)
     run_evaluation(ckpt_path, config_path=args.config, scenario=args.scenario)
+

@@ -117,22 +117,9 @@ def precompute_drug_features(
             "token_ids": ids.cpu(),
             "token_mask": mask.cpu()
         }
-        descriptor_matrix.append(desc.numpy())
-        
-    # Apply global Z-score normalization to continuous descriptors
-    if descriptor_matrix:
-        desc_arr = np.array(descriptor_matrix) # Shape: (N, 200)
-        mean = np.mean(desc_arr, axis=0)
-        std = np.std(desc_arr, axis=0)
-        std[std == 0] = 1.0 # Protect against zero variance
-        
-        logger.info("Applying global Z-score normalization to physical descriptors...")
-        for smiles in feature_store:
-            raw_desc = feature_store[smiles]["descriptors"].numpy()
-            norm_desc = (raw_desc - mean) / std
-            feature_store[smiles]["descriptors"] = torch.tensor(norm_desc, dtype=torch.float32)
 
     return feature_store
+
 
 
 def main():

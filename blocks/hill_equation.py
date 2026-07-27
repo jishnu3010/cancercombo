@@ -29,9 +29,10 @@ class BivariateHillSolver(nn.Module):
         # 2. Dose Masking (Task 1 & Phase 8)
         # Replacing hard clamping (clamp(min=1e-6)) with masking to preserve zero-dose controls.
         # Hard clamping destroys ~70% of dose information and converts zero-dose controls into non-zero exposure.
-        mask_a = doses_a > 1e-9
-        mask_b = doses_b > 1e-9
+        mask_a = doses_a > 0.0
+        mask_b = doses_b > 0.0
         mask_ab = mask_a & mask_b
+
         
         # Substitute 1.0 for zero-dose concentrations before log() to prevent log(0) = -inf NaNs.
         doses_a_safe = torch.where(mask_a, doses_a, torch.ones_like(doses_a))

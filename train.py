@@ -181,8 +181,17 @@ def run_training(
     else:
         logger.info("No precomputed drug feature store found. Falling back to on-the-fly preprocessing.")
     
-    train_dataset = DrugComboDataset(train_data, cell_features, drug_feature_store=drug_features)
-    val_dataset = DrugComboDataset(val_data, cell_features, drug_feature_store=drug_features)
+    train_dataset = DrugComboDataset(
+        train_data, cell_features, drug_feature_store=drug_features,
+        use_pretrained_molformer=m_config.use_pretrained_molformer,
+        molformer_model_name=m_config.molformer_model_name
+    )
+    val_dataset = DrugComboDataset(
+        val_data, cell_features, drug_feature_store=drug_features,
+        use_pretrained_molformer=m_config.use_pretrained_molformer,
+        molformer_model_name=m_config.molformer_model_name
+    )
+
 
     logger.info(
         "Dataset sizes | "
@@ -265,16 +274,32 @@ def run_training(
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         net = CancerCombo(m_config).to(device)
         loss_fn = CancerComboLoss()
-        optimizer = torch.optim.AdamW(net.parameters(), lr=t_config.lr, weight_decay=t_config.weight_decay)
+        opt_name = getattr(t_config, "optimizer_name", "AdamW").lower()
+        if opt_name == "sgd":
+            optimizer = torch.optim.SGD(net.parameters(), lr=t_config.lr, weight_decay=t_config.weight_decay, momentum=0.9)
+        elif opt_name == "adam":
+            optimizer = torch.optim.Adam(net.parameters(), lr=t_config.lr, weight_decay=t_config.weight_decay)
+        else:
+            optimizer = torch.optim.AdamW(net.parameters(), lr=t_config.lr, weight_decay=t_config.weight_decay)
         
-        # Config-driven scheduler parameters with min_lr threshold to prevent learning rate collapse
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode="min",
-            factor=t_config.scheduler_factor,
-            patience=t_config.scheduler_patience,
-            min_lr=getattr(t_config, "min_lr", 1.0e-6)
-        )
+        sched_name = getattr(t_config, "scheduler_name", "ReduceLROnPlateau")
+        if sched_name == "ReduceLROnPlateau":
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                mode="min",
+                factor=t_config.scheduler_factor,
+                patience=t_config.scheduler_patience,
+                min_lr=getattr(t_config, "min_lr", 1.0e-6)
+            )
+        elif sched_name == "CosineAnnealingLR":
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=t_config.epochs, eta_min=getattr(t_config, "min_lr", 1.0e-6)
+            )
+        else:
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer, mode="min", factor=t_config.scheduler_factor, patience=t_config.scheduler_patience, min_lr=getattr(t_config, "min_lr", 1.0e-6)
+            )
+
 
         
         best_val_loss = float("inf")
