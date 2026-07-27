@@ -45,7 +45,9 @@ class TrainingConfig:
     optimizer_name: str = "AdamW"
     scheduler_name: str = "ReduceLROnPlateau"
     scheduler_factor: float = 0.5
-    scheduler_patience: int = 3
+    scheduler_patience: int = 10
+    min_lr: float = 1.0e-6
+
 
 def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, TrainingConfig]:
     """Loads configuration parameters from config.yaml and returns dataclass objects.
@@ -132,7 +134,9 @@ def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, Training
         optimizer_name=str(training_data.get("optimizer_name", "AdamW")),
         scheduler_name=str(training_data.get("scheduler_name", "ReduceLROnPlateau")),
         scheduler_factor=float(training_data.get("scheduler_factor", 0.5)),
-        scheduler_patience=int(training_data.get("scheduler_patience", 3))
+        scheduler_patience=int(training_data.get("scheduler_patience", 10)),
+        min_lr=float(training_data.get("min_lr", 1.0e-6))
     )
+
     
     return model_config, training_config

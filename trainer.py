@@ -157,14 +157,17 @@ class CancerComboLightningModule(pl.LightningModule):
             weight_decay=self.training_config.weight_decay
         )
         factor = getattr(self.training_config, "scheduler_factor", 0.5)
-        patience = getattr(self.training_config, "scheduler_patience", 3)
+        patience = getattr(self.training_config, "scheduler_patience", 10)
+        min_lr = getattr(self.training_config, "min_lr", 1.0e-6)
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
             mode="min",
             factor=factor,
-            patience=patience
+            patience=patience,
+            min_lr=min_lr
         )
+
         return {
             "optimizer": optimizer,
             "lr_scheduler": {

@@ -28,8 +28,10 @@ training:
   optimizer_name: "AdamW"
   scheduler_name: "ReduceLROnPlateau"
   scheduler_factor: 0.5
-  scheduler_patience: 3
+  scheduler_patience: 10
+  min_lr: 1.0e-6
   lr: 1.0e-4
+
   weight_decay: 1.0e-5
   device: "cuda"
   checkpoint_dir: "checkpoints"

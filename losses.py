@@ -9,7 +9,8 @@ class CancerComboLoss(nn.Module):
     and optional Auxiliary Parameter Supervision loss.
     """
     
-    def __init__(self, rank_lambda: float = 0.1, aux_lambda: float = 0.05, num_ranking_pairs: int = 256):
+    def __init__(self, rank_lambda: float = 1.0, aux_lambda: float = 0.05, num_ranking_pairs: int = 256):
+
         super().__init__()
         self.mse = nn.MSELoss()
         self.margin_ranking = nn.MarginRankingLoss(margin=0.0)

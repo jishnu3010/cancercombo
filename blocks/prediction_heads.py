@@ -32,12 +32,18 @@ class CancerComboPredictionHeads(nn.Module):
         self.output_bias = nn.Parameter(torch.zeros(8))
         
     def _build_head(self, d_model: int, d_ff: int) -> nn.Sequential:
-        return nn.Sequential(
+        head = nn.Sequential(
             nn.Linear(d_model, d_ff),
             nn.ReLU(),
             nn.Dropout(self.config.dropout),
             nn.Linear(d_ff, 1)
         )
+        # Small weight initialization on the final projection layer to ensure raw outputs start near 0.0,
+        # maximizing initial gradient flow through sigmoid (sigmoid'(0) = 0.25) and preventing saturation.
+        nn.init.normal_(head[-1].weight, std=0.01)
+        nn.init.zeros_(head[-1].bias)
+        return head
+
         
     def forward(
         self,

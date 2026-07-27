@@ -267,10 +267,15 @@ def run_training(
         loss_fn = CancerComboLoss()
         optimizer = torch.optim.AdamW(net.parameters(), lr=t_config.lr, weight_decay=t_config.weight_decay)
         
-        # Phase 9: Remove hardcoded scheduler parameters, use config values
+        # Config-driven scheduler parameters with min_lr threshold to prevent learning rate collapse
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="min", factor=t_config.scheduler_factor, patience=t_config.scheduler_patience
+            optimizer,
+            mode="min",
+            factor=t_config.scheduler_factor,
+            patience=t_config.scheduler_patience,
+            min_lr=getattr(t_config, "min_lr", 1.0e-6)
         )
+
         
         best_val_loss = float("inf")
         start_epoch = 1
