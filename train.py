@@ -508,7 +508,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument("--scenario", type=int, default=1, help="Split scenario (1, 2, or 3)")
-    parser.add_argument("--engine", type=str, default="auto", choices=["auto", "lightning", "native"], help="Training engine: auto, lightning, or native")
+    parser.add_argument("--engine", type=str, default="native", choices=["auto", "lightning", "native"], help="Training engine: auto, lightning, or native (default: native — avoids PyTorch Lightning TQDMProgressBar hangs seen on this hardware)")
+
     parser.add_argument("--debug_backprop", action="store_true", help="Attach backward trace hooks to the native training path")
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint file to resume training")
     args = parser.parse_args()
