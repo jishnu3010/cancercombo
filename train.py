@@ -7,9 +7,10 @@ enforce_single_thread()
 
 import torch
 from torch.utils.data import DataLoader
-torch.autograd.set_detect_anomaly(True)
-torch.backends.cudnn.enabled = False
-torch.backends.cudnn.benchmark = False
+if torch.cuda.is_available():
+    torch.backends.cudnn.enabled = True
+    torch.backends.cudnn.benchmark = True
+
 try:
     import pytorch_lightning as pl  # type: ignore # pyrefly: ignore [missing-import]
     from pytorch_lightning.callbacks import ModelCheckpoint  # type: ignore # pyrefly: ignore [missing-import]
@@ -360,26 +361,22 @@ def run_training(
 
 
 
-                    # Task 3: Gradient Diagnostics (global norm, total params, % params with grad, % zero grads)
-                    grads = [p.grad.detach() for p in net.parameters() if p.requires_grad and p.grad is not None]
-                    if grads:
-                        grad_norm = torch.norm(torch.stack([g.norm(2) for g in grads]), 2).item()
-                        params_with_grad_count = sum(p.numel() for p in net.parameters() if p.requires_grad and p.grad is not None)
-                        zero_grad_count = sum((g == 0).sum().item() for g in grads)
-                        pct_with_grad = (params_with_grad_count / max(1, total_trainable_params)) * 100.0
-                        pct_zero_grad = (zero_grad_count / max(1, total_trainable_params)) * 100.0
-                    else:
-                        grad_norm, pct_with_grad, pct_zero_grad = 0.0, 0.0, 0.0
-
-                    last_grad_norm = grad_norm
-                    last_pct_with_grad = pct_with_grad
-                    last_pct_zero_grad = pct_zero_grad
-
-                    torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=5.0)
+                    grad_norm = torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=5.0).item()
                     optimizer.step()
+
+                    # Compute detailed parameter coverage diagnostics on first/last batch
+                    if batch_idx == 0 or batch_idx == len(train_loader) - 1:
+                        grads = [p.grad.detach() for p in net.parameters() if p.requires_grad and p.grad is not None]
+                        if grads:
+                            params_with_grad_count = sum(p.numel() for p in net.parameters() if p.requires_grad and p.grad is not None)
+                            zero_grad_count = sum((g == 0).sum().item() for g in grads)
+                            last_pct_with_grad = (params_with_grad_count / max(1, total_trainable_params)) * 100.0
+                            last_pct_zero_grad = (zero_grad_count / max(1, total_trainable_params)) * 100.0
+                        last_grad_norm = grad_norm
 
                     train_loss_sum += loss.item()
                     pbar.set_postfix({"train_loss": f"{loss.item():.4f}", "grad_norm": f"{grad_norm:.2f}"})
+
 
                 train_loss = train_loss_sum / max(len(train_loader), 1)
 
