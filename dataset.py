@@ -398,11 +398,12 @@ class DrugComboDataset(Dataset):
             ids_a = feat_a["token_ids"] if isinstance(feat_a, dict) else feat_a[2]
             mask_a = feat_a["token_mask"] if isinstance(feat_a, dict) else feat_a[3]
         else:
-            if smiles_a not in self._dynamic_cache:
+            cache_key_a = (smiles_a, self.use_pretrained_molformer)
+            if cache_key_a not in self._dynamic_cache:
                 m_a, d_a, _ = self.preprocessor.process_smiles(smiles_a)
                 i_a, mk_a = self._tokenize_smiles(smiles_a)
-                self._dynamic_cache[smiles_a] = (m_a, d_a, i_a, mk_a)
-            morgan_a, desc_a, ids_a, mask_a = self._dynamic_cache[smiles_a]
+                self._dynamic_cache[cache_key_a] = (m_a, d_a, i_a, mk_a)
+            morgan_a, desc_a, ids_a, mask_a = self._dynamic_cache[cache_key_a]
 
         if feat_b is not None:
             morgan_b = feat_b["morgan"] if isinstance(feat_b, dict) else feat_b[0]
@@ -410,11 +411,13 @@ class DrugComboDataset(Dataset):
             ids_b = feat_b["token_ids"] if isinstance(feat_b, dict) else feat_b[2]
             mask_b = feat_b["token_mask"] if isinstance(feat_b, dict) else feat_b[3]
         else:
-            if smiles_b not in self._dynamic_cache:
+            cache_key_b = (smiles_b, self.use_pretrained_molformer)
+            if cache_key_b not in self._dynamic_cache:
                 m_b, d_b, _ = self.preprocessor.process_smiles(smiles_b)
                 i_b, mk_b = self._tokenize_smiles(smiles_b)
-                self._dynamic_cache[smiles_b] = (m_b, d_b, i_b, mk_b)
-            morgan_b, desc_b, ids_b, mask_b = self._dynamic_cache[smiles_b]
+                self._dynamic_cache[cache_key_b] = (m_b, d_b, i_b, mk_b)
+            morgan_b, desc_b, ids_b, mask_b = self._dynamic_cache[cache_key_b]
+
 
         
         # Get biological profile
