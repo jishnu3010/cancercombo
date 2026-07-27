@@ -354,7 +354,10 @@ def run_training(
                         b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
                     )
 
+                    loss = loss_fn(y_pred, target, params)
                     loss.backward()
+
+
 
 
                     # Task 3: Gradient Diagnostics (global norm, total params, % params with grad, % zero grads)
