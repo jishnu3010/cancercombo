@@ -376,11 +376,57 @@ def run_training(
                     f"Val RMSE: {v_rmse:.4f} | Val Pearson: {v_pearson:.4f} | Val Spearman: {v_spearman:.4f}"
                 )
 
+                # if val_loss < best_val_loss:
+                #     best_val_loss = val_loss
+                #     ckpt_path = os.path.join(t_config.checkpoint_dir, "cancercombo_best.ckpt")
+                #     torch.save({"state_dict": net.state_dict(), "config": m_config}, ckpt_path)
+                #     logger.info(f"Saved best model checkpoint to '{ckpt_path}'")
+                # --------------------------------------------------------
+                # Save best checkpoint based on validation loss
+                # --------------------------------------------------------
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
-                    ckpt_path = os.path.join(t_config.checkpoint_dir, "cancercombo_best.ckpt")
-                    torch.save({"state_dict": net.state_dict(), "config": m_config}, ckpt_path)
-                    logger.info(f"Saved best model checkpoint to '{ckpt_path}'")
+                
+                    ckpt_path = os.path.join(
+                        t_config.checkpoint_dir,
+                        "cancercombo_best.ckpt"
+                    )
+                
+                    torch.save({
+                        "epoch": epoch,
+                        "state_dict": net.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "best_val_loss": best_val_loss,
+                        "config": m_config,
+                    }, ckpt_path)
+                
+                    logger.info(f"Saved BEST checkpoint -> {ckpt_path}")
+                # --------------------------------------------------------
+                # Save checkpoint every 200 epochs
+                # --------------------------------------------------------
+                if epoch % 200 == 0:
+                
+                    ckpt_path = os.path.join(
+                        t_config.checkpoint_dir,
+                        f"epoch_{epoch}.ckpt"
+                    )
+                
+                    torch.save({
+                        "epoch": epoch,
+                        "state_dict": net.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "scheduler_state_dict": scheduler.state_dict(),
+                        "train_loss": train_loss,
+                        "val_loss": val_loss,
+                        "val_rmse": v_rmse,
+                        "val_pearson": v_pearson,
+                        "val_spearman": v_spearman,
+                        "config": m_config,
+                    }, ckpt_path)
+                
+                    logger.info(f"Saved periodic checkpoint -> {ckpt_path}")
+        
         finally:
             for handle in hook_handles:
                 handle.remove()
