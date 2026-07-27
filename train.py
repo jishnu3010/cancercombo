@@ -355,8 +355,11 @@ def run_training(
                         b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
                     )
 
-                    loss = loss_fn(y_pred, target, params)
+                    params_true = {p: b_gpu[p] for p in ["e1", "e2", "e3", "log_c1", "log_c2", "h1", "h2", "alpha"] if p in b_gpu}
+                    loss = loss_fn(y_pred, target, params, params_true if params_true else None)
+
                     loss.backward()
+
 
 
 

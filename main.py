@@ -83,10 +83,11 @@ def main():
     parser.add_argument(
         "--engine",
         type=str,
-        default="native",
+        default="auto",
         choices=["auto", "lightning", "native"],
-        help="Execution engine: native, lightning, or auto (default: native)"
+        help="Execution engine: auto, lightning, or native (default: auto)"
     )
+
     parser.add_argument(
         "--epochs",
         type=int,
