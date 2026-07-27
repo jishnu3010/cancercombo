@@ -2,62 +2,102 @@ import torch
 import torch.nn as nn
 from typing import Tuple
 
+from blocks.molformer_encoder import MolFormerEncoder
+from blocks.morgan_encoder import MorganEncoder
+from blocks.descriptor_encoder import DescriptorEncoder
+from blocks.fusion import AttentionMultiRepresentationFusion
+from blocks.cell_encoder import CellLineEncoder
+from blocks.drug_cell_attention import DrugCellCrossAttention
+from blocks.drug_drug_attention import DrugDrugCrossAttention
+from blocks.shared_feature import SymmetricComboFusion
+from blocks.prediction_heads import CancerComboPredictionHeads
+from blocks.hill_equation import BivariateHillSolver
+
 class CancerCombo(nn.Module):
-    """A clean, robust, and deadlock-free architecture for Dose-Response Prediction."""
+    """Complete, modular CancerCombo architecture for dose-response prediction.
+    
+    Integrates SMILES MolFormer sequence encoding, Morgan and continuous Descriptor encoders,
+    Attention Multi-Representation Fusion, Pathway Cell Line Encoder, Drug-Cell Cross Attention,
+    Symmetric Combo Fusion for exact permutation invariance, constrained Prediction Heads,
+    and numerically stable Bivariate Hill Solver.
+    """
     
     def __init__(self, config):
         super().__init__()
         self.config = config
         d_model = config.d_model
         
-        # 1. Drug Feature Projections (Standard MLPs)
-        self.morgan_proj = nn.Sequential(
-            nn.Linear(config.morgan_in_dim, d_model),
-            nn.GELU(),
-            nn.LayerNorm(d_model)
+        # 1. SMILES & Molecular Encoders
+        # Integrated MolFormer encoder to process SMILES token IDs (Phase 3)
+        self.molformer_enc = MolFormerEncoder(
+            d_model=d_model,
+            vocab_size=100,
+            nhead=config.n_heads,
+            dim_feedforward=config.d_ff,
+            dropout=config.dropout,
+            use_pretrained=getattr(config, "use_pretrained_molformer", False),
+            model_name=getattr(config, "molformer_model_name", "ibm/MoLFormer-XL-CIMA-100M")
         )
-        self.desc_proj = nn.Sequential(
-            nn.Linear(config.descriptor_in_dim, d_model),
-            nn.GELU(),
-            nn.LayerNorm(d_model)
+        # Morgan fingerprint encoder block
+        self.morgan_enc = MorganEncoder(
+            in_dim=config.morgan_in_dim,
+            d_model=d_model,
+            dropout=config.dropout
         )
-        # Assuming MolFormer output is already d_model, else add a projection
-        
-        # 2. Robust Feature Fusion (Bypassing MultiheadAttention bugs)
-        # Concatenate MolFormer, Morgan, Descriptor -> pass through MLP
-        self.drug_fusion = nn.Sequential(
-            nn.Linear(d_model * 3, d_model * 2),
-            nn.GELU(),
-            nn.Dropout(config.dropout),
-            nn.Linear(d_model * 2, d_model),
-            nn.LayerNorm(d_model)
-        )
-        
-        # 3. Cell Line Encoder
-        self.cell_enc = nn.Sequential(
-            nn.Linear(config.cell_in_dim, d_model * 2),
-            nn.GELU(),
-            nn.Dropout(config.dropout),
-            nn.Linear(d_model * 2, d_model),
-            nn.LayerNorm(d_model)
+        # continuous molecular descriptor encoder block
+        self.descriptor_enc = DescriptorEncoder(
+            in_dim=config.descriptor_in_dim,
+            d_model=d_model,
+            dropout=config.dropout
         )
         
-        # 4. Drug-Cell Interaction (Replacing buggy Cross-Attention with Bilinear/MLP Fusion)
-        self.drug_cell_fusion = nn.Sequential(
-            nn.Linear(d_model * 2, d_model * 2),
-            nn.GELU(),
-            nn.Dropout(config.dropout),
-            nn.Linear(d_model * 2, d_model),
-            nn.LayerNorm(d_model)
+        # 2. Multi-Head Self-Attention Fusion Block (Phase 4)
+        # Dynamic self-attention mechanism fusing MolFormer, Morgan, and Descriptor features
+        self.fusion = AttentionMultiRepresentationFusion(
+            d_model=d_model,
+            n_heads=config.n_heads,
+            dropout=config.dropout
         )
         
-        # 5. Prediction Heads (Generating Pharmacological Params)
-        self.heads = nn.Sequential(
-            nn.Linear(d_model * 2, d_model), # Takes concatenated Drug A & Drug B
-            nn.GELU(),
-            nn.LayerNorm(d_model),
-            nn.Linear(d_model, 8) # e1, e2, e3, log_c1, log_c2, h1, h2, alpha
+        # 3. Transcriptomic Pathway Cell Line Encoder
+        self.cell_enc = CellLineEncoder(
+            in_dim=config.cell_in_dim,
+            d_model=d_model,
+            n_pathways=config.n_pathways,
+            use_pathway_projection=config.use_pathway_projection,
+            dropout=config.dropout
         )
+        
+        # 4. Drug-Cell Cross-Attention Block (Phase 5)
+        # Drug embedding attends to pathway cell tokens
+        self.drug_cell_attn = DrugCellCrossAttention(
+            d_model=d_model,
+            n_heads=config.n_heads,
+            dropout=config.dropout
+        )
+        
+        # 5. Optional Mutual Drug-Drug Attention
+        if getattr(config, "enable_drug_drug_attention", False):
+            self.drug_drug_attn = DrugDrugCrossAttention(
+                d_model=d_model,
+                n_heads=config.n_heads,
+                dropout=config.dropout
+            )
+            
+        # 6. Symmetric Combination Fusion Block (Phase 6)
+        # Enforces mathematical permutation invariance when swapping Drug A and Drug B
+        self.symmetric_fusion = SymmetricComboFusion(
+            d_model=d_model,
+            dropout=config.dropout
+        )
+        
+        # 7. Constrained Biophysical Prediction Heads (Phase 7)
+        # Sigmoid transforms project outputs to biological parameter boundaries
+        self.heads = CancerComboPredictionHeads(config)
+        
+        # 8. Numerically Stable Bivariate Hill Solver with Masking (Phase 1 & Phase 8)
+        # Masked Hill equation solver preserving zero-dose controls and non-zero gradients
+        self.hill_solver = BivariateHillSolver(e0=100.0)
 
     def forward(
         self,
@@ -65,66 +105,38 @@ class CancerCombo(nn.Module):
         drug_b_ids, drug_b_mask, drug_b_morgan, drug_b_desc,
         cell_line, doses_a, doses_b
     ):
-        # 1. Dummy MolFormer Pooling (Replace with actual MolFormer call if integrated)
-        # For now, assuming pooled_a is available. If not, replace this block with your actual MolFormer output.
-        pooled_a = torch.zeros(drug_a_morgan.size(0), self.config.d_model, device=drug_a_morgan.device)
-        pooled_b = torch.zeros(drug_b_morgan.size(0), self.config.d_model, device=drug_b_morgan.device)
+        # 1. Encode Drug A representations
+        seq_a, pooled_a = self.molformer_enc(drug_a_ids, drug_a_mask)
+        morgan_a = self.morgan_enc(drug_a_morgan)
+        desc_a = self.descriptor_enc(drug_a_desc)
+        fused_a = self.fusion(pooled_a, morgan_a, desc_a)
         
-        # 2. Encode & Fuse Drug A
-        morgan_a = self.morgan_proj(drug_a_morgan)
-        desc_a = self.desc_proj(drug_a_desc)
-        fused_a = self.drug_fusion(torch.cat([pooled_a, morgan_a, desc_a], dim=-1))
+        # 2. Encode Drug B representations
+        seq_b, pooled_b = self.molformer_enc(drug_b_ids, drug_b_mask)
+        morgan_b = self.morgan_enc(drug_b_morgan)
+        desc_b = self.descriptor_enc(drug_b_desc)
+        fused_b = self.fusion(pooled_b, morgan_b, desc_b)
         
-        # 3. Encode & Fuse Drug B
-        morgan_b = self.morgan_proj(drug_b_morgan)
-        desc_b = self.desc_proj(drug_b_desc)
-        fused_b = self.drug_fusion(torch.cat([pooled_b, morgan_b, desc_b], dim=-1))
-        
-        # 4. Encode Cell Line
+        # 3. Encode Cell Line pathway embeddings
         cell_features = self.cell_enc(cell_line)
         
-        # 5. Drug-Cell Interaction
-        cond_a = self.drug_cell_fusion(torch.cat([fused_a, cell_features], dim=-1))
-        cond_b = self.drug_cell_fusion(torch.cat([fused_b, cell_features], dim=-1))
+        # 4. Cross-attend Drug representations onto Cell Line tokens
+        cond_a = self.drug_cell_attn(fused_a, cell_features)
+        cond_b = self.drug_cell_attn(fused_b, cell_features)
         
-        # 6. Predict Parameters
-        combo_features = torch.cat([cond_a, cond_b], dim=-1)
-        params_raw = self.heads(combo_features)
-        
-        # Split into individual parameters
-        e1, e2, e3 = params_raw[:, 0], params_raw[:, 1], params_raw[:, 2]
-        log_c1, log_c2 = params_raw[:, 3], params_raw[:, 4]
-        h1, h2, alpha = params_raw[:, 5], params_raw[:, 6], params_raw[:, 7]
-        
-        # 7. Clean, Safe Hill Equation (No Masks, No Zero Gradients)
-        # Using simple continuous functions to guarantee gradient flow
-        doses_a_safe = torch.clamp(doses_a, min=1e-6)
-        doses_b_safe = torch.clamp(doses_b, min=1e-6)
-        
-        log_x1 = torch.log(doses_a_safe)
-        log_x2 = torch.log(doses_b_safe)
-        
-        h1_u, h2_u = h1.unsqueeze(-1).unsqueeze(-1), h2.unsqueeze(-1).unsqueeze(-1)
-        log_c1_u, log_c2_u = log_c1.unsqueeze(-1).unsqueeze(-1), log_c2.unsqueeze(-1).unsqueeze(-1)
-        
-        if log_x1.dim() == 2: log_x1 = log_x1.unsqueeze(-1)
-        if log_x2.dim() == 2: log_x2 = log_x2.unsqueeze(1)
+        # 5. Mutual Drug-Drug Attention (if enabled)
+        if hasattr(self, "drug_drug_attn") and getattr(self.config, "enable_drug_drug_attention", False):
+            aware_a, aware_b = self.drug_drug_attn(cond_a, cond_b)
+        else:
+            aware_a, aware_b = cond_a, cond_b
             
-        exp_A = log_c1_u * h1_u + log_c2_u * h2_u
-        exp_B = log_x1 * h1_u + log_c2_u * h2_u
-        exp_C = log_c1_u * h1_u + log_x2 * h2_u
-        exp_D = log_x1 * h1_u + log_x2 * h2_u
+        # 6. Symmetric Fusion for Permutation Invariance
+        z_combo = self.symmetric_fusion(aware_a, aware_b)
         
-        def safe_exp(x):
-            return torch.exp(torch.clamp(x, min=-20.0, max=20.0))
-            
-        val_A, val_B, val_C, val_D = safe_exp(exp_A), safe_exp(exp_B), safe_exp(exp_C), safe_exp(exp_D)
+        # 7. Predict Constrained Pharmacological Parameters
+        e1, e2, e3, log_c1, log_c2, h1, h2, alpha = self.heads(aware_a, aware_b, z_combo)
         
-        e1_u, e2_u, e3_u, alpha_u = e1.view(-1, 1, 1), e2.view(-1, 1, 1), e3.view(-1, 1, 1), alpha.view(-1, 1, 1)
-        
-        numerator = 100.0 * val_A + e1_u * val_B + e2_u * val_C + e3_u * alpha_u * val_D
-        denominator = val_A + val_B + val_C + alpha_u * val_D
-        
-        y_pred = numerator / (denominator + 1e-8)
+        # 8. Solve 2D Dose-Response Matrix with Bivariate Hill Equation Solver
+        y_pred = self.hill_solver(doses_a, doses_b, e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
         
         return y_pred, (e1, e2, e3, log_c1, log_c2, h1, h2, alpha)

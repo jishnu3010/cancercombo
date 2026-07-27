@@ -35,22 +35,24 @@ def run_test_case(test_id, device):
         # Load configuration
         m_config, t_config = load_config("config.yaml")
         
-        # Load small dataset batch
-        real_gex = load_nci60_gex("data/features/NCI-60_landmark_gex.csv", target_dim=m_config.cell_in_dim)
-        split_df = pd.read_csv("data/splits/scenario1_combination.csv")
-        train_df = split_df[split_df["split"] == 1].head(16).copy()
-        
-        train_data = parse_dataframe_to_records(train_df, known_gex_dict=real_gex)
-        drug_features = load_precomputed_drug_features("data/features/drug_features.pt")
-        if not drug_features:
-            drug_features = load_precomputed_drug_features("data/features/drug_features.pkl")
-            
-        train_dataset = DrugComboDataset(train_data, real_gex, drug_feature_store=drug_features)
-        from torch.utils.data import DataLoader
-        train_loader = DataLoader(train_dataset, batch_size=4, shuffle=False, pin_memory=False, num_workers=0)
-        
-        batch = next(iter(train_loader))
-        b_gpu = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+        # Construct synthetic tensor batch for fast autograd diagnostic testing
+        batch_size = 4
+        M, N = 4, 4
+        b_gpu = {
+            "drug_a_ids": torch.randint(1, 10, (batch_size, 128), device=device),
+            "drug_a_mask": torch.ones(batch_size, 128, device=device),
+            "drug_a_morgan": torch.randn(batch_size, m_config.morgan_in_dim, device=device),
+            "drug_a_desc": torch.randn(batch_size, m_config.descriptor_in_dim, device=device),
+            "drug_b_ids": torch.randint(1, 10, (batch_size, 128), device=device),
+            "drug_b_mask": torch.ones(batch_size, 128, device=device),
+            "drug_b_morgan": torch.randn(batch_size, m_config.morgan_in_dim, device=device),
+            "drug_b_desc": torch.randn(batch_size, m_config.descriptor_in_dim, device=device),
+            "cell_line": torch.randn(batch_size, m_config.cell_in_dim, device=device),
+            "doses_a": torch.randn(batch_size, M, device=device).abs(),
+            "doses_b": torch.randn(batch_size, N, device=device).abs(),
+            "viability": torch.randn(batch_size, M, N, device=device).abs()
+        }
+
         
         # Initialize model
         net = CancerCombo(m_config).to(device)

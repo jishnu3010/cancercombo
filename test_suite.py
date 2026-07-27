@@ -71,10 +71,9 @@ def test_full_model_forward_and_backward(enable_dd_attn):
         if param.requires_grad:
             if not enable_dd_attn and "drug_drug_attn" in name:
                 continue
-            # Temporarily comment out for diagnostic component isolation:
-            # assert param.grad is not None, f"Parameter {name} has no gradient!"
-            if param.grad is not None:
-                assert not torch.isnan(param.grad).any(), f"Parameter {name} gradient is NaN!"
+            assert param.grad is not None, f"Parameter {name} has no gradient!"
+            assert not torch.isnan(param.grad).any(), f"Parameter {name} gradient is NaN!"
+
 
 
 @parametrize("enable_dd_attn", [True, False])
