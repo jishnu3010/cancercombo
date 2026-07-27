@@ -420,9 +420,13 @@ def run_training(
                 val_loss = val_loss_sum / max(len(val_loader), 1)
                 
                 # Task 2: Step scheduler and log LR in scientific notation (e.g. LR = 1.234567890123e-05)
-                scheduler.step(val_loss)
+                if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    scheduler.step(val_loss)
+                else:
+                    scheduler.step()
                 current_lr = optimizer.param_groups[0]['lr']
                 lr_str = f"{current_lr:.12e}"
+
 
                 if val_preds_list:
                     v_preds = np.concatenate(val_preds_list, axis=0).flatten()
