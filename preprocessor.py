@@ -19,10 +19,21 @@ class MolecularPreprocessor:
         self.descriptor_names = [desc[0] for desc in Descriptors._descList][:200]
         self.cache_size = cache_size
         self._cache = {}
-        if HAS_GENERATOR:
+        self._generator = None
+
+    def _get_generator(self):
+        if self._generator is None and HAS_GENERATOR:
             self._generator = rdFingerprintGenerator.GetMorganGenerator(radius=self.morgan_radius, fpSize=self.morgan_nbits)
-        else:
-            self._generator = None
+        return self._generator
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_generator"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._generator = None
         
     def smiles_to_mol(self, smiles: str) -> Optional[Chem.Mol]:
         """Convert SMILES to RDKit Mol object.
@@ -53,8 +64,9 @@ class MolecularPreprocessor:
         if mol is None:
             return np.zeros(self.morgan_nbits, dtype=np.float32)
         try:
-            if self._generator is not None:
-                fp = self._generator.GetFingerprint(mol)
+            generator = self._get_generator()
+            if generator is not None:
+                fp = generator.GetFingerprint(mol)
             else:
                 fp = rdMolDescriptors.GetMorganFingerprintAsBitVect(
                     mol, radius=self.morgan_radius, nBits=self.morgan_nbits

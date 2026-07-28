@@ -211,6 +211,12 @@ def run_training(
     if num_workers > 0 and os.name != 'nt':
         loader_kwargs["persistent_workers"] = True
         loader_kwargs["prefetch_factor"] = 2
+        import torch.multiprocessing as mp
+        try:
+            mp.set_start_method('spawn', force=True)
+            logger.info("  Set multiprocessing start method to 'spawn' for safe CUDA training with multiple workers.")
+        except RuntimeError as e:
+            logger.warning(f"  [WARNING] Could not set multiprocessing start method to 'spawn': {e}")
         
     train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
     val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
