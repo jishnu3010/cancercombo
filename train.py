@@ -346,8 +346,11 @@ def run_training(
                 for batch_idx, batch in enumerate(pbar):
                     if epoch == start_epoch and batch_idx == 0:
                         logger.info("DEBUG [Batch 0]: Starting first training step...")
+                        logger.info("DEBUG [Batch 0]: Zeroing gradients...")
 
                     optimizer.zero_grad()
+                    if epoch == start_epoch and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Transferring batch to device...")
                     b_gpu = {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
                     
                     target = b_gpu.get("viability", b_gpu.get("viability_matrix"))
@@ -355,23 +358,31 @@ def run_training(
                         logger.warning(f"Batch {batch_idx} is missing target keys (viability/viability_matrix). Skipping.")
                         continue
 
+                    if epoch == start_epoch and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Entering forward pass...")
                     y_pred, params = net(
                         b_gpu["drug_a_ids"], b_gpu["drug_a_mask"], b_gpu["drug_a_morgan"], b_gpu["drug_a_desc"],
                         b_gpu["drug_b_ids"], b_gpu["drug_b_mask"], b_gpu["drug_b_morgan"], b_gpu["drug_b_desc"],
                         b_gpu["cell_line"], b_gpu["doses_a"], b_gpu["doses_b"]
                     )
+                    if epoch == start_epoch and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Forward pass successful. Computing loss...")
 
                     params_true = {p: b_gpu[p] for p in ["e1", "e2", "e3", "log_c1", "log_c2", "h1", "h2", "alpha"] if p in b_gpu}
                     loss = loss_fn(y_pred, target, params, params_true if params_true else None)
+                    if epoch == start_epoch and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Loss computed. Running backward pass...")
 
                     loss.backward()
-
-
-
-
+                    if epoch == start_epoch and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Backward pass successful. Clipping gradients...")
 
                     grad_norm = torch.nn.utils.clip_grad_norm_(net.parameters(), max_norm=5.0).item()
+                    if epoch == start_epoch and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Gradients clipped. Running optimizer step...")
                     optimizer.step()
+                    if epoch == start_epoch and batch_idx == 0:
+                        logger.info("DEBUG [Batch 0]: Optimizer step successful. Finished first step.")
 
                     # Compute detailed parameter coverage diagnostics on first/last batch
                     if batch_idx == 0 or batch_idx == len(train_loader) - 1:
