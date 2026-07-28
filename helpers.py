@@ -57,8 +57,6 @@ def patch_triton_fallback() -> None:
                 a = a.unsqueeze(-1)
             if b.dim() == 2:
                 b = b.unsqueeze(1)
-            if a.dim() == 3 and b.dim() == 3 and a.size(2) == 1 and b.size(1) == 1:
-                return torch.bmm(a, b)
             return a * b
 
         triton_impl._bmm_outer_product_impl = fallback_bmm_outer_product
@@ -79,8 +77,6 @@ def patch_triton_fallback() -> None:
                 a = a.unsqueeze(-1)
             if b.dim() == 2:
                 b = b.unsqueeze(1)
-            if a.dim() == 3 and b.dim() == 3 and a.size(2) == 1 and b.size(1) == 1:
-                return torch.bmm(a, b)
             return a * b
 
         triton_kernels.bmm_outer_product = fallback_kernel

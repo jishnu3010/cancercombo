@@ -91,8 +91,9 @@ def run_test_case(test_id, device):
             
         elif test_id == "Bypass_Cross_Attentions":
             # Bypass both Drug-Cell Cross Attention and Drug-Drug Attention
-            net.drug_cell_attn = lambda x, y: x
-            net.drug_drug_attn = lambda x, y: (x, y)
+            net.drug_cell_attn.forward = lambda x, y: x
+            if hasattr(net, "drug_drug_attn"):
+                net.drug_drug_attn.forward = lambda x, y: (x, y)
             
         elif test_id == "Disable_Ranking_Loss":
             # Set ranking loss weight lambda to 0
