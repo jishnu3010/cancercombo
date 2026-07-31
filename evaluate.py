@@ -33,35 +33,47 @@ class ModelEvaluator:
         preds_list = []
         trues_list = []
 
+# ============================================================
+# OLD CODE - DISABLED FOR MOLFORMER-ONLY ABLATION
+# ============================================================
+#         with torch.no_grad():
+#             for batch in dataloader:
+#                 drug_a_ids = batch["drug_a_ids"].to(self.device)
+#                 drug_a_mask = batch["drug_a_mask"].to(self.device)
+#                 drug_a_morgan = batch["drug_a_morgan"].to(self.device)
+#                 drug_a_desc = batch["drug_a_desc"].to(self.device)
+#                 drug_b_ids = batch["drug_b_ids"].to(self.device)
+#                 drug_b_mask = batch["drug_b_mask"].to(self.device)
+#                 drug_b_morgan = batch["drug_b_morgan"].to(self.device)
+#                 drug_b_desc = batch["drug_b_desc"].to(self.device)
+#                 cell_line = batch["cell_line"].to(self.device)
+#                 doses_a = batch["doses_a"].to(self.device)
+#                 doses_b = batch["doses_b"].to(self.device)
+#                 viability = batch["viability"].to(self.device)
+#                 y_pred, _ = model(
+#                     drug_a_ids=drug_a_ids, drug_a_mask=drug_a_mask, drug_a_morgan=drug_a_morgan, drug_a_desc=drug_a_desc,
+#                     drug_b_ids=drug_b_ids, drug_b_mask=drug_b_mask, drug_b_morgan=drug_b_morgan, drug_b_desc=drug_b_desc,
+#                     cell_line=cell_line, doses_a=doses_a, doses_b=doses_b
+#                 )
+
+# ============================================================
+# NEW CODE - MOLFORMER-ONLY ABLATION
+# ============================================================
         with torch.no_grad():
             for batch in dataloader:
-                drug_a_ids = batch["drug_a_ids"].to(self.device)
-                drug_a_mask = batch["drug_a_mask"].to(self.device)
-                drug_a_morgan = batch["drug_a_morgan"].to(self.device)
-                drug_a_desc = batch["drug_a_desc"].to(self.device)
-
-                drug_b_ids = batch["drug_b_ids"].to(self.device)
-                drug_b_mask = batch["drug_b_mask"].to(self.device)
-                drug_b_morgan = batch["drug_b_morgan"].to(self.device)
-                drug_b_desc = batch["drug_b_desc"].to(self.device)
-
-                cell_line = batch["cell_line"].to(self.device)
-                doses_a = batch["doses_a"].to(self.device)
-                doses_b = batch["doses_b"].to(self.device)
-                viability = batch["viability"].to(self.device)
+                b_gpu = {k: v.to(self.device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+                viability = b_gpu.get("viability", b_gpu.get("viability_matrix"))
 
                 y_pred, _ = model(
-                    drug_a_ids=drug_a_ids,
-                    drug_a_mask=drug_a_mask,
-                    drug_a_morgan=drug_a_morgan,
-                    drug_a_desc=drug_a_desc,
-                    drug_b_ids=drug_b_ids,
-                    drug_b_mask=drug_b_mask,
-                    drug_b_morgan=drug_b_morgan,
-                    drug_b_desc=drug_b_desc,
-                    cell_line=cell_line,
-                    doses_a=doses_a,
-                    doses_b=doses_b,
+                    drug_a_ids=b_gpu.get("drug_a_ids"),
+                    drug_a_mask=b_gpu.get("drug_a_mask"),
+                    drug_b_ids=b_gpu.get("drug_b_ids"),
+                    drug_b_mask=b_gpu.get("drug_b_mask"),
+                    cell_line=b_gpu.get("cell_line"),
+                    doses_a=b_gpu.get("doses_a"),
+                    doses_b=b_gpu.get("doses_b"),
+                    drug_a_emb=b_gpu.get("drug_a_emb"),
+                    drug_b_emb=b_gpu.get("drug_b_emb"),
                 )
 
                 preds_list.append(y_pred.cpu().numpy())
@@ -93,16 +105,31 @@ def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", c
             torch.backends.cuda.enable_flash_sdp(False)
             torch.backends.cuda.enable_mem_efficient_sdp(False)
             torch.backends.cuda.enable_math_sdp(True)
-            logger.info("  [SUCCESS] Disabled FlashAttention and MemEfficient Attention SDP backends (preventing CUDA compiler & padding mask hangs).")
+            logger.info("  [SUCCESS] Disabled FlashAttention and MemEfficient Attention SDP backends.")
         except Exception as e:
             logger.warning(f"  [WARNING] Failed to configure SDPA kernels: {e}")
     
+# ============================================================
+# OLD CODE - DISABLED FOR MOLFORMER-ONLY ABLATION
+# ============================================================
+#     scenario_files = {
+#         1: "data/splits/scenario1_combination.csv",
+#         2: "data/splits/scenario2_cell.csv",
+#         3: "data/splits/scenario3_drug.csv"
+#     }
+#     split_path = scenario_files.get(scenario, scenario_files[1])
+
+# ============================================================
+# NEW CODE - MOLFORMER-ONLY ABLATION
+# ============================================================
     scenario_files = {
-        1: "data/splits/scenario1_combination.csv",
+        1: "data/scenario1_combination_50k.csv",
         2: "data/splits/scenario2_cell.csv",
         3: "data/splits/scenario3_drug.csv"
     }
     split_path = scenario_files.get(scenario, scenario_files[1])
+    if not os.path.exists(split_path) and os.path.exists("data/splits/scenario1_combination.csv"):
+        split_path = "data/splits/scenario1_combination.csv"
     
     if not os.path.exists(split_path):
         logger.error(
@@ -129,11 +156,25 @@ def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", c
 
     from dataset import parse_dataframe_to_records, load_precomputed_drug_features
     test_records = parse_dataframe_to_records(test_df, known_gex_dict=cell_features)
-    drug_features = load_precomputed_drug_features("data/features/drug_features.pt")
+
+# ============================================================
+# OLD CODE - DISABLED FOR MOLFORMER-ONLY ABLATION
+# ============================================================
+#     drug_features = load_precomputed_drug_features("data/features/drug_features.pt")
+#     if not drug_features:
+#         drug_features = load_precomputed_drug_features("data/features/drug_features.pkl")
+
+# ============================================================
+# NEW CODE - MOLFORMER-ONLY ABLATION
+# ============================================================
+    drug_features = load_precomputed_drug_features("data/features/molformer_only/drug_features_molformer.pt")
     if not drug_features:
-        drug_features = load_precomputed_drug_features("data/features/drug_features.pkl")
+        drug_features = load_precomputed_drug_features("data/features/molformer_only/drug_features_molformer.pkl")
+    if not drug_features:
+        drug_features = load_precomputed_drug_features("data/features/drug_features.pt")
     test_dataset = DrugComboDataset(test_records, cell_features, drug_feature_store=drug_features)
     test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
+
     
     logger.info(f"Loading checkpoint: {checkpoint_path}")
     if not os.path.exists(checkpoint_path):
