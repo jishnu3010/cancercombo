@@ -34,8 +34,10 @@ training:
   lr: 1.0e-4
 
   weight_decay: 1.0e-5
+  device: "cuda"
   checkpoint_dir: "checkpoints/ablation2_morgan_rdkit"
   save_top_k: 3
   num_workers: 0
   seed: 42
+
 
