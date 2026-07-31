@@ -19,7 +19,10 @@ class SynergyPredictor:
         # Strip PyTorch Lightning 'model.' prefix if present
         state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
         
-        self.model.load_state_dict(state_dict)
+        incompatible = self.model.load_state_dict(state_dict, strict=False)
+        trainable_missing = [k for k in incompatible.missing_keys if not k.startswith("molformer_enc.pretrained_")]
+        if trainable_missing:
+            raise RuntimeError(f"Checkpoint is missing required trainable keys: {trainable_missing}")
         self.model.to(self.device)
         self.model.eval()
         

@@ -201,7 +201,12 @@ def run_evaluation(checkpoint_path: str = "checkpoints/cancercombo_best.ckpt", c
     state_dict = checkpoint.get("state_dict", checkpoint)
     # Strip PyTorch Lightning 'model.' prefix if present
     state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
-    model.load_state_dict(state_dict)
+    incompatible = model.load_state_dict(state_dict, strict=False)
+    trainable_missing = [k for k in incompatible.missing_keys if not k.startswith("molformer_enc.pretrained_")]
+    if trainable_missing:
+        logger.error(f"Missing trainable keys in checkpoint: {trainable_missing}")
+        raise RuntimeError(f"Checkpoint is missing required trainable keys: {trainable_missing}")
+    logger.info("Successfully loaded all trained CancerCombo parameters from checkpoint.")
     
     evaluator = ModelEvaluator(device=device)
     logger.info("Evaluating...")
