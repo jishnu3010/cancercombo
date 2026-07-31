@@ -71,8 +71,11 @@ def test_full_model_forward_and_backward(enable_dd_attn):
         if param.requires_grad:
             if not enable_dd_attn and "drug_drug_attn" in name:
                 continue
+            if any(disabled_module in name for disabled_module in ["morgan_enc", "descriptor_enc", "fusion.q_proj", "fusion.k_proj", "fusion.v_proj", "fusion.out_proj", "fusion.pooling"]):
+                continue
             assert param.grad is not None, f"Parameter {name} has no gradient!"
             assert not torch.isnan(param.grad).any(), f"Parameter {name} gradient is NaN!"
+
 
 
 

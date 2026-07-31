@@ -389,60 +389,89 @@ class DrugComboDataset(Dataset):
         viability = np.array(item['viability_matrix'], dtype=np.float32)
         
         # Calculate or retrieve chemical representations
+# ============================================================
+# OLD CODE - DISABLED FOR MOLFORMER-ONLY ABLATION
+# ============================================================
+#         feat_a = self.drug_feature_store.get(smiles_a)
+#         feat_b = self.drug_feature_store.get(smiles_b)
+#         if feat_a is not None:
+#             morgan_a = feat_a["morgan"] if isinstance(feat_a, dict) else feat_a[0]
+#             desc_a = feat_a["descriptors"] if isinstance(feat_a, dict) else feat_a[1]
+#             ids_a = feat_a["token_ids"] if isinstance(feat_a, dict) else feat_a[2]
+#             mask_a = feat_a["token_mask"] if isinstance(feat_a, dict) else feat_a[3]
+#         else:
+#             cache_key_a = (smiles_a, self.use_pretrained_molformer)
+#             if cache_key_a not in self._dynamic_cache:
+#                 m_a, d_a, _ = self.preprocessor.process_smiles(smiles_a)
+#                 i_a, mk_a = self._tokenize_smiles(smiles_a)
+#                 self._dynamic_cache[cache_key_a] = (m_a, d_a, i_a, mk_a)
+#             morgan_a, desc_a, ids_a, mask_a = self._dynamic_cache[cache_key_a]
+
+# ============================================================
+# NEW CODE - MOLFORMER-ONLY ABLATION
+# ============================================================
         feat_a = self.drug_feature_store.get(smiles_a)
         feat_b = self.drug_feature_store.get(smiles_b)
 
-        if feat_a is not None:
-            morgan_a = feat_a["morgan"] if isinstance(feat_a, dict) else feat_a[0]
-            desc_a = feat_a["descriptors"] if isinstance(feat_a, dict) else feat_a[1]
-            ids_a = feat_a["token_ids"] if isinstance(feat_a, dict) else feat_a[2]
-            mask_a = feat_a["token_mask"] if isinstance(feat_a, dict) else feat_a[3]
+        if feat_a is not None and "molformer_emb" in feat_a:
+            ids_a = feat_a["token_ids"]
+            mask_a = feat_a["token_mask"]
+            emb_a = feat_a["molformer_emb"]
         else:
-            cache_key_a = (smiles_a, self.use_pretrained_molformer)
-            if cache_key_a not in self._dynamic_cache:
-                m_a, d_a, _ = self.preprocessor.process_smiles(smiles_a)
-                i_a, mk_a = self._tokenize_smiles(smiles_a)
-                self._dynamic_cache[cache_key_a] = (m_a, d_a, i_a, mk_a)
-            morgan_a, desc_a, ids_a, mask_a = self._dynamic_cache[cache_key_a]
+            ids_a, mask_a = self._tokenize_smiles(smiles_a)
+            emb_a = None
 
-        if feat_b is not None:
-            morgan_b = feat_b["morgan"] if isinstance(feat_b, dict) else feat_b[0]
-            desc_b = feat_b["descriptors"] if isinstance(feat_b, dict) else feat_b[1]
-            ids_b = feat_b["token_ids"] if isinstance(feat_b, dict) else feat_b[2]
-            mask_b = feat_b["token_mask"] if isinstance(feat_b, dict) else feat_b[3]
+        if feat_b is not None and "molformer_emb" in feat_b:
+            ids_b = feat_b["token_ids"]
+            mask_b = feat_b["token_mask"]
+            emb_b = feat_b["molformer_emb"]
         else:
-            cache_key_b = (smiles_b, self.use_pretrained_molformer)
-            if cache_key_b not in self._dynamic_cache:
-                m_b, d_b, _ = self.preprocessor.process_smiles(smiles_b)
-                i_b, mk_b = self._tokenize_smiles(smiles_b)
-                self._dynamic_cache[cache_key_b] = (m_b, d_b, i_b, mk_b)
-            morgan_b, desc_b, ids_b, mask_b = self._dynamic_cache[cache_key_b]
+            ids_b, mask_b = self._tokenize_smiles(smiles_b)
+            emb_b = None
 
-
-        
         # Get biological profile
         norm_cell = re.sub(r'[^A-Z0-9]', '', str(cell_name).upper())
         cell_vec = self.cell_line_features.get(cell_name, self.cell_line_features.get(norm_cell))
         if cell_vec is None:
             raise KeyError(f"Cell line features for '{cell_name}' not found. Do not zero-pad.")
         assert cell_vec.shape[-1] == 976, f"Expected 976-dim gene expression vector, got {cell_vec.shape[-1]}"
-            
+
+# ============================================================
+# OLD CODE - DISABLED FOR MOLFORMER-ONLY ABLATION
+# ============================================================
+#         res_dict = {
+#             "drug_a_ids": _to_tensor(ids_a, dtype=torch.long),
+#             "drug_a_mask": _to_tensor(mask_a, dtype=torch.float32),
+#             "drug_a_morgan": _to_tensor(morgan_a, dtype=torch.float32),
+#             "drug_a_desc": _to_tensor(desc_a, dtype=torch.float32),
+#             "drug_b_ids": _to_tensor(ids_b, dtype=torch.long),
+#             "drug_b_mask": _to_tensor(mask_b, dtype=torch.float32),
+#             "drug_b_morgan": _to_tensor(morgan_b, dtype=torch.float32),
+#             "drug_b_desc": _to_tensor(desc_b, dtype=torch.float32),
+#             "cell_line": _to_tensor(cell_vec, dtype=torch.float32),
+#             "doses_a": _to_tensor(doses_a, dtype=torch.float32),
+#             "doses_b": _to_tensor(doses_b, dtype=torch.float32),
+#             "viability": _to_tensor(viability, dtype=torch.float32)
+#         }
+
+# ============================================================
+# NEW CODE - MOLFORMER-ONLY ABLATION
+# ============================================================
         res_dict = {
             "drug_a_ids": _to_tensor(ids_a, dtype=torch.long),
             "drug_a_mask": _to_tensor(mask_a, dtype=torch.float32),
-            "drug_a_morgan": _to_tensor(morgan_a, dtype=torch.float32),
-            "drug_a_desc": _to_tensor(desc_a, dtype=torch.float32),
-            
             "drug_b_ids": _to_tensor(ids_b, dtype=torch.long),
             "drug_b_mask": _to_tensor(mask_b, dtype=torch.float32),
-            "drug_b_morgan": _to_tensor(morgan_b, dtype=torch.float32),
-            "drug_b_desc": _to_tensor(desc_b, dtype=torch.float32),
-            
             "cell_line": _to_tensor(cell_vec, dtype=torch.float32),
             "doses_a": _to_tensor(doses_a, dtype=torch.float32),
             "doses_b": _to_tensor(doses_b, dtype=torch.float32),
             "viability": _to_tensor(viability, dtype=torch.float32)
         }
+        if emb_a is not None:
+            res_dict["drug_a_emb"] = _to_tensor(emb_a, dtype=torch.float32)
+        if emb_b is not None:
+            res_dict["drug_b_emb"] = _to_tensor(emb_b, dtype=torch.float32)
+
         
         # Include optional Hill parameters for auxiliary supervision if present
         for p in ["e1", "e2", "e3", "log_c1", "log_c2", "h1", "h2", "alpha"]:

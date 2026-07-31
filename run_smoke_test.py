@@ -30,7 +30,9 @@ def run_smoke_test():
     
     # 2. Check Scenario Split CSVs
     print("\nStep 2 & 5: Checking generated scenario split CSVs...")
-    s1_path = "data/splits/scenario1_combination.csv"
+    s1_path = "data/scenario1_combination_50k.csv"
+    if not os.path.exists(s1_path):
+        s1_path = "data/splits/scenario1_combination.csv"
     s2_path = "data/splits/scenario2_cell.csv"
     s3_path = "data/splits/scenario3_drug.csv"
     
@@ -65,14 +67,19 @@ def run_smoke_test():
     print(f"  [PASS] Subset partition sizes -> Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
     
     # 8. Create DrugComboDataset objects
-    print("\nStep 8: Creating DrugComboDataset objects...")
+    print("\nStep 8: Creating DrugComboDataset objects with MolFormer-only features...")
     train_records = parse_dataframe_to_records(train_df, known_gex_dict=gex_dict)
     val_records = parse_dataframe_to_records(val_df, known_gex_dict=gex_dict)
     test_records = parse_dataframe_to_records(test_df, known_gex_dict=gex_dict)
     
-    train_ds = DrugComboDataset(train_records, gex_dict)
-    val_ds = DrugComboDataset(val_records, gex_dict)
-    test_ds = DrugComboDataset(test_records, gex_dict)
+    from dataset import load_precomputed_drug_features
+    drug_features = load_precomputed_drug_features("data/features/molformer_only/drug_features_molformer.pt")
+    if not drug_features:
+        drug_features = load_precomputed_drug_features("data/features/molformer_only/drug_features_molformer.pkl")
+    
+    train_ds = DrugComboDataset(train_records, gex_dict, drug_feature_store=drug_features)
+    val_ds = DrugComboDataset(val_records, gex_dict, drug_feature_store=drug_features)
+    test_ds = DrugComboDataset(test_records, gex_dict, drug_feature_store=drug_features)
     print(f"  [PASS] Created datasets. Train samples: {len(train_ds)}, Val: {len(val_ds)}, Test: {len(test_ds)}")
     
     # 9. Create DataLoaders
@@ -84,10 +91,9 @@ def run_smoke_test():
     # 10. Fetch one real training batch
     print("\nStep 10 & 12: Fetching real training batch and verifying tensor shapes...")
     batch = next(iter(train_loader))
-    for k in ["drug_a_ids", "drug_a_mask", "drug_a_morgan", "drug_a_desc", 
-              "drug_b_ids", "drug_b_mask", "drug_b_morgan", "drug_b_desc", 
-              "cell_line", "doses_a", "doses_b", "viability"]:
-        print(f"  Tensor '{k}': shape {batch[k].shape}, dtype {batch[k].dtype}")
+    for k in ["drug_a_ids", "drug_a_mask", "drug_b_ids", "drug_b_mask", "cell_line", "doses_a", "doses_b", "viability"]:
+        if k in batch:
+            print(f"  Tensor '{k}': shape {batch[k].shape}, dtype {batch[k].dtype}")
         
     assert batch["cell_line"].shape[-1] == 976, f"Expected cell_line dim 976, got {batch['cell_line'].shape[-1]}"
     assert batch["viability"].dim() == 3, f"Expected 3D viability matrix (B, M, N), got {batch['viability'].dim()}D"
@@ -97,9 +103,10 @@ def run_smoke_test():
     m_config, t_config = load_config()
     model = CancerCombo(m_config)
     y_pred, params = model(
-        batch["drug_a_ids"], batch["drug_a_mask"], batch["drug_a_morgan"], batch["drug_a_desc"],
-        batch["drug_b_ids"], batch["drug_b_mask"], batch["drug_b_morgan"], batch["drug_b_desc"],
-        batch["cell_line"], batch["doses_a"], batch["doses_b"]
+        drug_a_ids=batch.get("drug_a_ids"), drug_a_mask=batch.get("drug_a_mask"),
+        drug_b_ids=batch.get("drug_b_ids"), drug_b_mask=batch.get("drug_b_mask"),
+        cell_line=batch.get("cell_line"), doses_a=batch.get("doses_a"), doses_b=batch.get("doses_b"),
+        drug_a_emb=batch.get("drug_a_emb"), drug_b_emb=batch.get("drug_b_emb")
     )
     print(f"  [PASS] Predicted y_pred shape: {y_pred.shape}")
     
@@ -137,9 +144,10 @@ def run_smoke_test():
     val_batch = next(iter(val_loader))
     with torch.no_grad():
         val_pred, _ = model(
-            val_batch["drug_a_ids"], val_batch["drug_a_mask"], val_batch["drug_a_morgan"], val_batch["drug_a_desc"],
-            val_batch["drug_b_ids"], val_batch["drug_b_mask"], val_batch["drug_b_morgan"], val_batch["drug_b_desc"],
-            val_batch["cell_line"], val_batch["doses_a"], val_batch["doses_b"]
+            drug_a_ids=val_batch.get("drug_a_ids"), drug_a_mask=val_batch.get("drug_a_mask"),
+            drug_b_ids=val_batch.get("drug_b_ids"), drug_b_mask=val_batch.get("drug_b_mask"),
+            cell_line=val_batch.get("cell_line"), doses_a=val_batch.get("doses_a"), doses_b=val_batch.get("doses_b"),
+            drug_a_emb=val_batch.get("drug_a_emb"), drug_b_emb=val_batch.get("drug_b_emb")
         )
         val_loss = loss_fn(val_pred, val_batch["viability"])
     print(f"  [PASS] Validation Loss: {val_loss.item():.6f}")
@@ -162,9 +170,10 @@ def run_smoke_test():
     with torch.no_grad():
         for test_batch in test_loader:
             p, _ = fresh_model(
-                test_batch["drug_a_ids"], test_batch["drug_a_mask"], test_batch["drug_a_morgan"], test_batch["drug_a_desc"],
-                test_batch["drug_b_ids"], test_batch["drug_b_mask"], test_batch["drug_b_morgan"], test_batch["drug_b_desc"],
-                test_batch["cell_line"], test_batch["doses_a"], test_batch["doses_b"]
+                drug_a_ids=test_batch.get("drug_a_ids"), drug_a_mask=test_batch.get("drug_a_mask"),
+                drug_b_ids=test_batch.get("drug_b_ids"), drug_b_mask=test_batch.get("drug_b_mask"),
+                cell_line=test_batch.get("cell_line"), doses_a=test_batch.get("doses_a"), doses_b=test_batch.get("doses_b"),
+                drug_a_emb=test_batch.get("drug_a_emb"), drug_b_emb=test_batch.get("drug_b_emb")
             )
             test_preds.append(p.numpy())
             test_trues.append(test_batch["viability"].numpy())
@@ -173,6 +182,7 @@ def run_smoke_test():
     test_trues = torch.tensor(np.concatenate(test_trues, axis=0))
     
     assert not torch.isnan(test_preds).any(), "NaN found in test predictions!"
+
     assert not torch.isinf(test_preds).any(), "Inf found in test predictions!"
     
     metrics = calculate_metrics(test_preds.numpy(), test_trues.numpy())
