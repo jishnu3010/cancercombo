@@ -28,38 +28,48 @@ class CancerCombo(nn.Module):
         d_model = config.d_model
         
         # 1. SMILES & Molecular Encoders
+        # Integrated MolFormer encoder to process SMILES token IDs (Phase 3)
+        self.molformer_enc = MolFormerEncoder(
+            d_model=d_model,
+            vocab_size=100,
+            nhead=config.n_heads,
+            dim_feedforward=config.d_ff,
+            dropout=config.dropout,
+            use_pretrained=getattr(config, "use_pretrained_molformer", False),
+            model_name=getattr(config, "molformer_model_name", "ibm/MoLFormer-XL-CIMA-100M")
+        )
+        # 1. SMILES & Molecular Encoders
+        # Integrated MolFormer encoder to process SMILES token IDs (Phase 3)
+        self.molformer_enc = MolFormerEncoder(
+            d_model=d_model,
+            vocab_size=100,
+            nhead=config.n_heads,
+            dim_feedforward=config.d_ff,
+            dropout=config.dropout,
+            use_pretrained=getattr(config, "use_pretrained_molformer", False),
+            model_name=getattr(config, "molformer_model_name", "ibm/MoLFormer-XL-CIMA-100M")
+        )
+
 # ============================================================
-# ABLATION 1 - MOLFORMER ONLY
-# DISABLED FOR ABLATION 2
+# OLD CODE - DISABLED FOR MOLFORMER-ONLY ABLATION
 # ============================================================
-#         self.molformer_enc = MolFormerEncoder(
+#         # Morgan fingerprint encoder block
+#         self.morgan_enc = MorganEncoder(
+#             in_dim=config.morgan_in_dim,
 #             d_model=d_model,
-#             vocab_size=100,
-#             nhead=config.n_heads,
-#             dim_feedforward=config.d_ff,
-#             dropout=config.dropout,
-#             use_pretrained=getattr(config, "use_pretrained_molformer", False),
-#             model_name=getattr(config, "molformer_model_name", "ibm/MoLFormer-XL-CIMA-100M")
+#             dropout=config.dropout
+#         )
+#         # continuous molecular descriptor encoder block
+#         self.descriptor_enc = DescriptorEncoder(
+#             in_dim=config.descriptor_in_dim,
+#             d_model=d_model,
+#             dropout=config.dropout
 #         )
 
 # ============================================================
-# ABLATION 2 - MORGAN + RDKIT DESCRIPTORS ONLY
-# ACTIVE
+# NEW CODE - MOLFORMER-ONLY ABLATION
 # ============================================================
-        # Morgan fingerprint encoder block
-        self.morgan_enc = MorganEncoder(
-            in_dim=config.morgan_in_dim,
-            d_model=d_model,
-            dropout=config.dropout
-        )
-        # Continuous molecular descriptor encoder block
-        self.descriptor_enc = DescriptorEncoder(
-            in_dim=config.descriptor_in_dim,
-            d_model=d_model,
-            dropout=config.dropout
-        )
-
-        # 2. Multi-Head Self-Attention Fusion Block (Fuses Morgan + Descriptors)
+        # 2. Multi-Head Self-Attention Fusion Block (Pass-through for MolFormer-only)
         self.fusion = AttentionMultiRepresentationFusion(
             d_model=d_model,
             n_heads=config.n_heads,
@@ -114,34 +124,34 @@ class CancerCombo(nn.Module):
         drug_a_emb=None, drug_b_emb=None
     ):
 # ============================================================
-# ABLATION 1 - MOLFORMER ONLY
-# DISABLED FOR ABLATION 2
+# OLD CODE - DISABLED FOR MOLFORMER-ONLY ABLATION
 # ============================================================
-#         if drug_a_emb is not None:
-#             pooled_a = drug_a_emb
-#         else:
-#             _, pooled_a = self.molformer_enc(drug_a_ids, drug_a_mask)
-#         fused_a = self.fusion(pooled_a)
-#
-#         if drug_b_emb is not None:
-#             pooled_b = drug_b_emb
-#         else:
-#             _, pooled_b = self.molformer_enc(drug_b_ids, drug_b_mask)
-#         fused_b = self.fusion(pooled_b)
+#         seq_a, pooled_a = self.molformer_enc(drug_a_ids, drug_a_mask)
+#         morgan_a = self.morgan_enc(drug_a_morgan)
+#         desc_a = self.descriptor_enc(drug_a_desc)
+#         fused_a = self.fusion(pooled_a, morgan_a, desc_a)
+#         
+#         seq_b, pooled_b = self.molformer_enc(drug_b_ids, drug_b_mask)
+#         morgan_b = self.morgan_enc(drug_b_morgan)
+#         desc_b = self.descriptor_enc(drug_b_desc)
+#         fused_b = self.fusion(pooled_b, morgan_b, desc_b)
 
 # ============================================================
-# ABLATION 2 - MORGAN + RDKIT DESCRIPTORS ONLY
-# ACTIVE
+# NEW CODE - MOLFORMER-ONLY ABLATION
 # ============================================================
-        # 1. Encode Drug A using Morgan + RDKit Descriptors ONLY
-        morgan_a = self.morgan_enc(drug_a_morgan)
-        desc_a = self.descriptor_enc(drug_a_desc)
-        fused_a = self.fusion(morgan_a, desc_a)
+        # 1. Encode Drug A using MolFormer ONLY (from precomputed emb or tokens)
+        if drug_a_emb is not None:
+            pooled_a = drug_a_emb
+        else:
+            _, pooled_a = self.molformer_enc(drug_a_ids, drug_a_mask)
+        fused_a = self.fusion(pooled_a)
 
-        # 2. Encode Drug B using Morgan + RDKit Descriptors ONLY
-        morgan_b = self.morgan_enc(drug_b_morgan)
-        desc_b = self.descriptor_enc(drug_b_desc)
-        fused_b = self.fusion(morgan_b, desc_b)
+        # 2. Encode Drug B using MolFormer ONLY (from precomputed emb or tokens)
+        if drug_b_emb is not None:
+            pooled_b = drug_b_emb
+        else:
+            _, pooled_b = self.molformer_enc(drug_b_ids, drug_b_mask)
+        fused_b = self.fusion(pooled_b)
         
         # 3. Encode Cell Line pathway embeddings
         cell_features = self.cell_enc(cell_line)
@@ -165,5 +175,4 @@ class CancerCombo(nn.Module):
         # 8. Solve 2D Dose-Response Matrix with Bivariate Hill Equation Solver
         y_pred = self.hill_solver(doses_a, doses_b, e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
         
-        return y_pred, (e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
-
+        return y_pred, (e1, e2, e3, log_c1, log_c2, h1, h2, alpha)

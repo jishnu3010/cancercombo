@@ -20,7 +20,7 @@ from blocks.drug_cell_attention import DrugCellCrossAttention
 
 @parametrize("enable_dd_attn", [True, False])
 def test_full_model_forward_and_backward(enable_dd_attn):
-    """Test full forward pass, bounds checking, and backpropagation gradients for Ablation 2."""
+    """Test full forward pass, bounds checking, and backpropagation gradients."""
     config = ModelConfig(
         d_model=256, n_heads=4, d_ff=512, dropout=0.1,
         molformer_in_dim=768, morgan_in_dim=2048, descriptor_in_dim=200,
@@ -35,9 +35,13 @@ def test_full_model_forward_and_backward(enable_dd_attn):
     batch_size = 2
     M, N = 5, 5
     
+    drug_a_ids = torch.randint(1, 10, (batch_size, 128))
+    drug_a_mask = torch.ones(batch_size, 128)
     drug_a_morgan = torch.randn(batch_size, 2048)
     drug_a_desc = torch.randn(batch_size, 200)
     
+    drug_b_ids = torch.randint(1, 10, (batch_size, 128))
+    drug_b_mask = torch.ones(batch_size, 128)
     drug_b_morgan = torch.randn(batch_size, 2048)
     drug_b_desc = torch.randn(batch_size, 200)
     
@@ -46,9 +50,9 @@ def test_full_model_forward_and_backward(enable_dd_attn):
     doses_b = torch.randn(batch_size, N).abs()
     
     y_pred, params = model(
-        drug_a_morgan=drug_a_morgan, drug_a_desc=drug_a_desc,
-        drug_b_morgan=drug_b_morgan, drug_b_desc=drug_b_desc,
-        cell_line=cell_line, doses_a=doses_a, doses_b=doses_b
+        drug_a_ids, drug_a_mask, drug_a_morgan, drug_a_desc,
+        drug_b_ids, drug_b_mask, drug_b_morgan, drug_b_desc,
+        cell_line, doses_a, doses_b
     )
     
     assert y_pred.shape == (batch_size, M, N)
@@ -67,8 +71,12 @@ def test_full_model_forward_and_backward(enable_dd_attn):
         if param.requires_grad:
             if not enable_dd_attn and "drug_drug_attn" in name:
                 continue
+            if any(disabled_module in name for disabled_module in ["morgan_enc", "descriptor_enc", "fusion.q_proj", "fusion.k_proj", "fusion.v_proj", "fusion.out_proj", "fusion.pooling"]):
+                continue
             assert param.grad is not None, f"Parameter {name} has no gradient!"
             assert not torch.isnan(param.grad).any(), f"Parameter {name} gradient is NaN!"
+
+
 
 
 @parametrize("enable_dd_attn", [True, False])
@@ -89,9 +97,13 @@ def test_permutation_invariance(enable_dd_attn):
     batch_size = 1
     M, N = 4, 4
     
+    ids_a = torch.randint(1, 10, (batch_size, 128))
+    mask_a = torch.ones(batch_size, 128)
     morgan_a = torch.randn(batch_size, 2048)
     desc_a = torch.randn(batch_size, 200)
     
+    ids_b = torch.randint(1, 10, (batch_size, 128))
+    mask_b = torch.ones(batch_size, 128)
     morgan_b = torch.randn(batch_size, 2048)
     desc_b = torch.randn(batch_size, 200)
     
@@ -101,19 +113,18 @@ def test_permutation_invariance(enable_dd_attn):
     
     with torch.no_grad():
         y_pred_ab, _ = model(
-            drug_a_morgan=morgan_a, drug_a_desc=desc_a,
-            drug_b_morgan=morgan_b, drug_b_desc=desc_b,
-            cell_line=cell_line, doses_a=doses_a, doses_b=doses_b
+            ids_a, mask_a, morgan_a, desc_a,
+            ids_b, mask_b, morgan_b, desc_b,
+            cell_line, doses_a, doses_b
         )
         
         y_pred_ba, _ = model(
-            drug_a_morgan=morgan_b, drug_a_desc=desc_b,
-            drug_b_morgan=morgan_a, drug_b_desc=desc_a,
-            cell_line=cell_line, doses_a=doses_b, doses_b=doses_a
+            ids_b, mask_b, morgan_b, desc_b,
+            ids_a, mask_a, morgan_a, desc_a,
+            cell_line, doses_b, doses_a
         )
         
     assert torch.allclose(y_pred_ab, y_pred_ba.transpose(1, 2), atol=1e-5)
-
 
 
 def test_hill_solver_shapes():
@@ -233,9 +244,8 @@ def test_encoders_and_fusion_shapes():
     desc_emb = descriptor(desc_in)
     assert desc_emb.shape == (batch_size, config.d_model)
     
-    fused = fusion(morgan_emb, desc_emb)
+    fused = fusion(pooled_emb, morgan_emb, desc_emb)
     assert fused.shape == (batch_size, config.d_model)
-
     
     cell_emb = cell(cell_in)
     assert cell_emb.shape == (batch_size, config.n_pathways, config.d_model)

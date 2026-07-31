@@ -100,21 +100,20 @@ class MolFormerEncoder(nn.Module):
         num_layers: int = 2,
         dropout: float = 0.1,
         use_pretrained: bool = False,
-        model_name: str = "ibm/MoLFormer-XL-CIMA-100M"
+        model_name: str = "ibm-research/MoLFormer-XL-both-10pct"
     ):
         super().__init__()
-        self.d_model = d_model
-        self.use_pretrained = use_pretrained and (AutoModel is not None)
-        
+        self.use_pretrained = use_pretrained
         if self.use_pretrained:
+            if AutoModel is None:
+                raise RuntimeError("transformers library (AutoModel) is required for pretrained MolFormer but failed to import.")
             try:
-                # Load pretrained HuggingFace MolFormer encoder model if available
+                # Load pretrained HuggingFace MolFormer encoder model
                 self.pretrained_model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
                 hidden_size = getattr(self.pretrained_model.config, "hidden_size", 768)
                 self.proj = nn.Linear(hidden_size, d_model) if hidden_size != d_model else nn.Identity()
             except Exception as e:
-                # Fall back gracefully to local SafeTransformerEncoder on network/load failure
-                self.use_pretrained = False
+                raise RuntimeError(f"FATAL: Failed to load pretrained IBM MolFormer model '{model_name}': {e}")
                 
         if not self.use_pretrained:
             # Local token embedding and deadlock-free SafeTransformerEncoder

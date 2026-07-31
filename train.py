@@ -176,17 +176,27 @@ def run_training(
     val_data = parse_dataframe_to_records(val_df, known_gex_dict=real_gex)
     cell_features = real_gex
     
-    drug_features = load_precomputed_drug_features("data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pt")
-    if not drug_features:
-        drug_features = load_precomputed_drug_features("data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pkl")
-
-    if drug_features:
-        logger.info(f"Loaded Morgan + RDKit Descriptors precomputed drug features for {len(drug_features)} SMILES strings.")
+    if getattr(m_config, "use_pretrained_molformer", False):
+        feat_path_pt = "data/features/pretrained_molformer_only/drug_features_pretrained_molformer.pt"
+        feat_path_pkl = "data/features/pretrained_molformer_only/drug_features_pretrained_molformer.pkl"
+        drug_features = load_precomputed_drug_features(feat_path_pt)
+        if not drug_features:
+            drug_features = load_precomputed_drug_features(feat_path_pkl)
+        if not drug_features:
+            raise FileNotFoundError(
+                f"FATAL: Pretrained MolFormer feature store not found at '{feat_path_pt}' or '{feat_path_pkl}'. "
+                "Please run precompute_molecular_features.py first. Fallback to non-pretrained/Morgan features is strictly forbidden."
+            )
+        logger.info(f"Loaded Pretrained IBM MoLFormer drug feature store for {len(drug_features)} SMILES strings.")
     else:
-        logger.info("No precomputed drug feature store found. Falling back to on-the-fly preprocessing.")
+        drug_features = load_precomputed_drug_features("data/features/molformer_only/drug_features_molformer.pt")
+        if not drug_features:
+            drug_features = load_precomputed_drug_features("data/features/molformer_only/drug_features_molformer.pkl")
+        if drug_features:
+            logger.info(f"Loaded non-pretrained MolFormer drug features for {len(drug_features)} SMILES strings.")
+        else:
+            logger.info("No precomputed drug feature store found. Falling back to on-the-fly preprocessing.")
     
-    t_config.checkpoint_dir = "checkpoints/ablation2_morgan_rdkit"
-
     train_dataset = DrugComboDataset(
         train_data, cell_features, drug_feature_store=drug_features,
         use_pretrained_molformer=m_config.use_pretrained_molformer,
@@ -197,7 +207,6 @@ def run_training(
         use_pretrained_molformer=m_config.use_pretrained_molformer,
         molformer_model_name=m_config.molformer_model_name
     )
-
 
 
     logger.info(
@@ -358,11 +367,12 @@ def run_training(
                         logger.warning(f"Batch {batch_idx} is missing target keys. Skipping.")
                         continue
 
-                    # Ablation 2 Morgan + RDKit Descriptors forward pass
+                    # MolFormer-only forward pass
                     y_pred, params = net(
-                        drug_a_morgan=b_gpu.get("drug_a_morgan"), drug_a_desc=b_gpu.get("drug_a_desc"),
-                        drug_b_morgan=b_gpu.get("drug_b_morgan"), drug_b_desc=b_gpu.get("drug_b_desc"),
-                        cell_line=b_gpu.get("cell_line"), doses_a=b_gpu.get("doses_a"), doses_b=b_gpu.get("doses_b")
+                        drug_a_ids=b_gpu.get("drug_a_ids"), drug_a_mask=b_gpu.get("drug_a_mask"),
+                        drug_b_ids=b_gpu.get("drug_b_ids"), drug_b_mask=b_gpu.get("drug_b_mask"),
+                        cell_line=b_gpu.get("cell_line"), doses_a=b_gpu.get("doses_a"), doses_b=b_gpu.get("doses_b"),
+                        drug_a_emb=b_gpu.get("drug_a_emb"), drug_b_emb=b_gpu.get("drug_b_emb")
                     )
 
                     params_true = {p: b_gpu[p] for p in ["e1", "e2", "e3", "log_c1", "log_c2", "h1", "h2", "alpha"] if p in b_gpu}
@@ -402,11 +412,11 @@ def run_training(
                             continue
 
                         y_pred, params = net(
-                            drug_a_morgan=b_gpu.get("drug_a_morgan"), drug_a_desc=b_gpu.get("drug_a_desc"),
-                            drug_b_morgan=b_gpu.get("drug_b_morgan"), drug_b_desc=b_gpu.get("drug_b_desc"),
-                            cell_line=b_gpu.get("cell_line"), doses_a=b_gpu.get("doses_a"), doses_b=b_gpu.get("doses_b")
+                            drug_a_ids=b_gpu.get("drug_a_ids"), drug_a_mask=b_gpu.get("drug_a_mask"),
+                            drug_b_ids=b_gpu.get("drug_b_ids"), drug_b_mask=b_gpu.get("drug_b_mask"),
+                            cell_line=b_gpu.get("cell_line"), doses_a=b_gpu.get("doses_a"), doses_b=b_gpu.get("doses_b"),
+                            drug_a_emb=b_gpu.get("drug_a_emb"), drug_b_emb=b_gpu.get("drug_b_emb")
                         )
-
                         
                         v_loss = loss_fn(y_pred, target_val, params)
                         val_loss_sum += v_loss.item()

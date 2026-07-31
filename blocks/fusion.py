@@ -21,60 +21,59 @@ class AttentionMultiRepresentationFusion(nn.Module):
         
         self.attn_dropout = nn.Dropout(dropout)
         
-        self.pooling = nn.Linear(2 * d_model, d_model)
+        self.pooling = nn.Linear(3 * d_model, d_model)
         self.norm = nn.LayerNorm(d_model)
         
 # ============================================================
-# ABLATION 1 - MOLFORMER ONLY
-# DISABLED FOR ABLATION 2
+# OLD CODE - DISABLED FOR MOLFORMER-ONLY ABLATION
 # ============================================================
 #     def forward(
 #         self,
 #         molformer_emb: torch.Tensor,
-#         morgan_emb: torch.Tensor = None,
-#         descriptor_emb: torch.Tensor = None
+#         morgan_emb: torch.Tensor,
+#         descriptor_emb: torch.Tensor
 #     ) -> torch.Tensor:
-#         """Passes through MolFormer embedding directly for MolFormer-only ablation."""
-#         return self.norm(molformer_emb)
+#         """Fuses three representation modes dynamically using manual self-attention."""
+#         B = molformer_emb.size(0)
+#         
+#         # Stack representations: (B, seq_len=3, d_model)
+#         stacked = torch.stack([molformer_emb, morgan_emb, descriptor_emb], dim=1)
+#         seq_len = 3
+#         
+#         # 1. Project Q, K, V
+#         Q = self.q_proj(stacked)
+#         K = self.k_proj(stacked)
+#         V = self.v_proj(stacked)
+#         
+#         # 2. Reshape for multi-head attention: (B, n_heads, seq_len, head_dim)
+#         Q = Q.view(B, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+#         K = K.view(B, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+#         V = V.view(B, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+#         
+#         # 3. Manual scaled dot-product attention (Immune to C++ kernel deadlocks)
+#         scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim) # (B, n_heads, 3, 3)
+#         attn_weights = torch.softmax(scores, dim=-1)
+#         attn_weights = self.attn_dropout(attn_weights)
+#         
+#         attn_out = torch.matmul(attn_weights, V) # (B, n_heads, 3, head_dim)
+#         
+#         # 4. Reshape back to (B, 3, d_model) and project output
+#         attn_out = attn_out.transpose(1, 2).contiguous().view(B, seq_len, self.d_model)
+#         attn_out = self.out_proj(attn_out)
+#         
+#         # 5. Flatten, pool, and apply residual
+#         flat_attn = attn_out.reshape(B, -1) # (B, 3 * d_model)
+#         fused = self.norm(self.pooling(flat_attn) + molformer_emb) # Residual to MolFormer
+#         return fused
 
 # ============================================================
-# ABLATION 2 - MORGAN + RDKIT DESCRIPTORS ONLY
-# ACTIVE
+# NEW CODE - MOLFORMER-ONLY ABLATION
 # ============================================================
     def forward(
         self,
-        morgan_emb: torch.Tensor,
-        descriptor_emb: torch.Tensor
+        molformer_emb: torch.Tensor,
+        morgan_emb: torch.Tensor = None,
+        descriptor_emb: torch.Tensor = None
     ) -> torch.Tensor:
-        """Fuses Morgan fingerprint embedding and RDKit descriptor embedding dynamically using manual self-attention."""
-        B = morgan_emb.size(0)
-        
-        # Stack representations: (B, seq_len=2, d_model)
-        stacked = torch.stack([morgan_emb, descriptor_emb], dim=1)
-        seq_len = 2
-        
-        # 1. Project Q, K, V
-        Q = self.q_proj(stacked)
-        K = self.k_proj(stacked)
-        V = self.v_proj(stacked)
-        
-        # 2. Reshape for multi-head attention: (B, n_heads, seq_len, head_dim)
-        Q = Q.view(B, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
-        K = K.view(B, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
-        V = V.view(B, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
-        
-        # 3. Manual scaled dot-product attention
-        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim) # (B, n_heads, 2, 2)
-        attn_weights = torch.softmax(scores, dim=-1)
-        attn_weights = self.attn_dropout(attn_weights)
-        
-        attn_out = torch.matmul(attn_weights, V) # (B, n_heads, 2, head_dim)
-        
-        # 4. Reshape back to (B, 2, d_model) and project output
-        attn_out = attn_out.transpose(1, 2).contiguous().view(B, seq_len, self.d_model)
-        attn_out = self.out_proj(attn_out)
-        
-        # 5. Flatten, pool, and apply residual
-        flat_attn = attn_out.reshape(B, -1) # (B, 2 * d_model)
-        fused = self.norm(self.pooling(flat_attn) + morgan_emb) # Residual to Morgan
-        return fused
+        """Passes through MolFormer embedding directly for MolFormer-only ablation."""
+        return self.norm(molformer_emb)
