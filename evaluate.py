@@ -195,45 +195,47 @@ def run_evaluation(checkpoint_path: str = "checkpoints/deepsynba_morgan_rdkit/ca
     )
     test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
 
-    if not os.path.exists(checkpoint_path):
-        candidate_paths = [
+    candidate_paths = [checkpoint_path]
+    if hasattr(t_config, "checkpoint_dir") and t_config.checkpoint_dir:
+        candidate_paths.extend([
             os.path.join(t_config.checkpoint_dir, "cancercombo_best.ckpt"),
             os.path.join(t_config.checkpoint_dir, "epoch_200.ckpt"),
-            "checkpoints/ablation2_drug_drug_attention/cancercombo_best.ckpt",
-            "checkpoints/ablation2_drug_drug_attention/epoch_200.ckpt",
-            "checkpoints/deepsynba_drug_drug_attention/cancercombo_best.ckpt",
-            "checkpoints/ablation3_no_attention/cancercombo_best.ckpt",
-            "checkpoints/deepsynba_morgan_rdkit/epoch_200.ckpt",
-            "checkpoints/deepsynba_morgan_rdkit/cancercombo_best.ckpt",
-            "checkpoints/ablation2_morgan_rdkit/cancercombo_best.ckpt",
-            "checkpoints/cancercombo_best.ckpt"
-        ]
-        for candidate in candidate_paths:
-            if os.path.exists(candidate):
-                logger.info(f"Specified checkpoint '{checkpoint_path}' not found. Resolved fallback checkpoint -> {candidate}")
-                checkpoint_path = candidate
-                break
+        ])
+    candidate_paths.extend([
+        "checkpoints/ablation2_drug_drug_attention/cancercombo_best.ckpt",
+        "checkpoints/ablation2_drug_drug_attention/epoch_200.ckpt",
+        "checkpoints/cancercombo_best.ckpt"
+    ])
+    
+    # Deduplicate while preserving order
+    seen = set()
+    unique_candidates = [p for p in candidate_paths if p and not (p in seen or seen.add(p))]
 
-    logger.info(f"Loading checkpoint: {checkpoint_path}")
-    if not os.path.exists(checkpoint_path):
-        logger.error(
-            f"Checkpoint path not found: '{checkpoint_path}'. "
-            "Please train a model first using 'python main.py --mode train' or specify a valid checkpoint path using '--checkpoint'."
-        )
-        return
-        
     model = CancerCombo(m_config)
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    state_dict = checkpoint.get("state_dict", checkpoint)
-    # Strip PyTorch Lightning 'model.' prefix if present
-    state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
-    incompatible = model.load_state_dict(state_dict, strict=False)
-    trainable_missing = [k for k in incompatible.missing_keys if not k.startswith("molformer_enc.pretrained_")]
-    if trainable_missing:
-        logger.error(f"Missing trainable keys in checkpoint '{checkpoint_path}': {trainable_missing}")
-        logger.error("HINT: Ensure you are loading the checkpoint from your latest training run (e.g. --checkpoint checkpoints/ablation2_drug_drug_attention/cancercombo_best.ckpt or epoch_200.ckpt).")
-        raise RuntimeError(f"Checkpoint '{checkpoint_path}' is missing required trainable keys. Ensure you specify the correct checkpoint path corresponding to your training run.")
-    logger.info("Successfully loaded all trained CancerCombo parameters from checkpoint.")
+    loaded_successfully = False
+    
+    for path in unique_candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            checkpoint = torch.load(path, map_location=device, weights_only=False)
+            state_dict = checkpoint.get("state_dict", checkpoint)
+            state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
+            incompatible = model.load_state_dict(state_dict, strict=False)
+            trainable_missing = [k for k in incompatible.missing_keys if not k.startswith("molformer_enc.pretrained_")]
+            if not trainable_missing:
+                logger.info(f"Successfully loaded all trained CancerCombo parameters from checkpoint: {path}")
+                checkpoint_path = path
+                loaded_successfully = True
+                break
+            else:
+                logger.warning(f"Checkpoint '{path}' exists but has missing trainable keys (outdated architecture). Trying next candidate...")
+        except Exception as e:
+            logger.warning(f"Failed to load checkpoint '{path}': {e}")
+
+    if not loaded_successfully:
+        logger.error(f"Could not load a compatible checkpoint from candidate paths: {unique_candidates}")
+        raise RuntimeError("No valid checkpoint matching current model architecture was found. Train a model first or check path.")
     
     evaluator = ModelEvaluator(device=device)
     logger.info("Evaluating...")
