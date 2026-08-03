@@ -57,8 +57,7 @@ class ModelEvaluator:
 #                 )
 
 # ============================================================
-# ABLATION 2 - MORGAN + RDKIT DESCRIPTORS ONLY
-# ACTIVE
+# NEW CODE - MOLFORMER-ONLY ABLATION
 # ============================================================
         with torch.no_grad():
             for batch in dataloader:
@@ -66,13 +65,15 @@ class ModelEvaluator:
                 viability = b_gpu.get("viability", b_gpu.get("viability_matrix"))
 
                 y_pred, _ = model(
-                    drug_a_morgan=b_gpu.get("drug_a_morgan"),
-                    drug_a_desc=b_gpu.get("drug_a_desc"),
-                    drug_b_morgan=b_gpu.get("drug_b_morgan"),
-                    drug_b_desc=b_gpu.get("drug_b_desc"),
+                    drug_a_ids=b_gpu.get("drug_a_ids"),
+                    drug_a_mask=b_gpu.get("drug_a_mask"),
+                    drug_b_ids=b_gpu.get("drug_b_ids"),
+                    drug_b_mask=b_gpu.get("drug_b_mask"),
                     cell_line=b_gpu.get("cell_line"),
                     doses_a=b_gpu.get("doses_a"),
-                    doses_b=b_gpu.get("doses_b")
+                    doses_b=b_gpu.get("doses_b"),
+                    drug_a_emb=b_gpu.get("drug_a_emb"),
+                    drug_b_emb=b_gpu.get("drug_b_emb"),
                 )
 
                 preds_list.append(y_pred.cpu().numpy())
@@ -108,6 +109,19 @@ def run_evaluation(checkpoint_path: str = "checkpoints/deepsynba_morgan_rdkit/ca
         except Exception as e:
             logger.warning(f"  [WARNING] Failed to configure SDPA kernels: {e}")
     
+# ============================================================
+# OLD CODE - DISABLED FOR MOLFORMER-ONLY ABLATION
+# ============================================================
+#     scenario_files = {
+#         1: "data/splits/scenario1_combination.csv",
+#         2: "data/splits/scenario2_cell.csv",
+#         3: "data/splits/scenario3_drug.csv"
+#     }
+#     split_path = scenario_files.get(scenario, scenario_files[1])
+
+# ============================================================
+# NEW CODE - MOLFORMER-ONLY ABLATION
+# ============================================================
     scenario_files = {
         1: "data/scenario1_combination_50k.csv",
         2: "data/splits/scenario2_cell.csv",
@@ -143,17 +157,35 @@ def run_evaluation(checkpoint_path: str = "checkpoints/deepsynba_morgan_rdkit/ca
     from dataset import parse_dataframe_to_records, load_precomputed_drug_features
     test_records = parse_dataframe_to_records(test_df, known_gex_dict=cell_features)
 
-    # Load Ablation 2 Feature Store
-    feature_store_path = "data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pt"
-    if not os.path.exists(feature_store_path):
-        feature_store_path = "data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pkl"
-    if not os.path.exists(feature_store_path):
-        raise FileNotFoundError(f"Ablation 2 feature store missing at '{feature_store_path}'. Must precompute features first.")
+# ============================================================
+# OLD CODE - DISABLED FOR MOLFORMER-ONLY ABLATION
+# ============================================================
+#     drug_features = load_precomputed_drug_features("data/features/drug_features.pt")
+#     if not drug_features:
+#         drug_features = load_precomputed_drug_features("data/features/drug_features.pkl")
 
-    drug_features = load_precomputed_drug_features(feature_store_path)
-    test_dataset = DrugComboDataset(test_records, cell_features, drug_feature_store=drug_features)
+    if getattr(m_config, "use_pretrained_molformer", False):
+        feat_path_pt = "data/features/pretrained_molformer_only/drug_features_pretrained_molformer.pt"
+        feat_path_pkl = "data/features/pretrained_molformer_only/drug_features_pretrained_molformer.pkl"
+        drug_features = load_precomputed_drug_features(feat_path_pt)
+        if not drug_features:
+            drug_features = load_precomputed_drug_features(feat_path_pkl)
+        if not drug_features:
+            raise FileNotFoundError(
+                f"FATAL: Pretrained MolFormer feature store not found at '{feat_path_pt}' or '{feat_path_pkl}'. "
+                "Please run precompute_molecular_features.py first. Fallback to non-pretrained/Morgan features is strictly forbidden."
+            )
+        logger.info(f"Loaded Pretrained IBM MoLFormer drug feature store for {len(drug_features)} SMILES strings.")
+    else:
+        drug_features = load_precomputed_drug_features("data/features/molformer_only/drug_features_molformer.pt")
+        if not drug_features:
+            drug_features = load_precomputed_drug_features("data/features/molformer_only/drug_features_molformer.pkl")
+    test_dataset = DrugComboDataset(
+        test_records, cell_features, drug_feature_store=drug_features,
+        use_pretrained_molformer=m_config.use_pretrained_molformer,
+        molformer_model_name=m_config.molformer_model_name
+    )
     test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
-
 
     
     logger.info(f"Loading checkpoint: {checkpoint_path}")
@@ -169,7 +201,12 @@ def run_evaluation(checkpoint_path: str = "checkpoints/deepsynba_morgan_rdkit/ca
     state_dict = checkpoint.get("state_dict", checkpoint)
     # Strip PyTorch Lightning 'model.' prefix if present
     state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
-    model.load_state_dict(state_dict)
+    incompatible = model.load_state_dict(state_dict, strict=False)
+    trainable_missing = [k for k in incompatible.missing_keys if not k.startswith("molformer_enc.pretrained_")]
+    if trainable_missing:
+        logger.error(f"Missing trainable keys in checkpoint: {trainable_missing}")
+        raise RuntimeError(f"Checkpoint is missing required trainable keys: {trainable_missing}")
+    logger.info("Successfully loaded all trained CancerCombo parameters from checkpoint.")
     
     evaluator = ModelEvaluator(device=device)
     logger.info("Evaluating...")

@@ -77,66 +77,120 @@ def extract_unique_smiles(input_path: str) -> List[str]:
 
 
 # ============================================================
-# ABLATION 1 - MOLFORMER ONLY
-# DISABLED FOR ABLATION 2
+# OLD CODE - DISABLED FOR MOLFORMER-ONLY ABLATION
 # ============================================================
-# from blocks.molformer_encoder import MolFormerEncoder
-#
 # def precompute_drug_features(
 #     smiles_list: List[str],
-#     max_length: int = 128,
-#     d_model: int = 256,
-#     batch_size: int = 64,
-#     device: str = "cpu"
+#     morgan_bits: int = 2048,
+#     n_descriptors: int = 200,
+#     max_length: int = 128
 # ) -> Dict[str, Dict[str, torch.Tensor]]:
+#     preprocessor = MolecularPreprocessor(morgan_nbits=morgan_bits, morgan_radius=2)
 #     tokenizer = SMILESTokenizer(max_len=max_length)
-#     molformer_encoder = MolFormerEncoder(d_model=d_model, vocab_size=100)
+#     feature_store: Dict[str, Dict[str, torch.Tensor]] = {}
+#     for idx, smiles in enumerate(smiles_list):
+#         morgan, desc, _ = preprocessor.process_smiles(smiles)
+#         morgan = torch.from_numpy(morgan) if isinstance(morgan, np.ndarray) else morgan
+#         desc = torch.from_numpy(desc) if isinstance(desc, np.ndarray) else desc
+#         ids, mask = tokenizer.tokenize(smiles)
+#         ids = torch.tensor(ids, dtype=torch.long)
+#         mask = torch.tensor(mask, dtype=torch.float32)
+#         feature_store[smiles] = {
+#             "morgan": morgan.cpu(),
+#             "descriptors": desc.cpu(),
+#             "token_ids": ids.cpu(),
+#             "token_mask": mask.cpu()
+#         }
+#     return feature_store
+
+# ============================================================
+# OLD ABLATION 1 - NON-PRETRAINED MOLFORMER
+# DISABLED
+# ============================================================
+# from dataset import SMILESTokenizer
+# def precompute_drug_features_non_pretrained(smiles_list: List[str], max_length: int = 128, d_model: int = 256, batch_size: int = 64, device: str = "cpu"):
+#     tokenizer = SMILESTokenizer(max_len=max_length)
+#     molformer_encoder = MolFormerEncoder(d_model=d_model, vocab_size=100, use_pretrained=False)
+#     molformer_encoder.eval().to(device)
 #     ...
 
 # ============================================================
-# ABLATION 2 - MORGAN + RDKIT DESCRIPTORS ONLY
+# NEW ABLATION 1 - PRETRAINED IBM MOLFORMER
 # ACTIVE
 # ============================================================
+from transformers import AutoTokenizer
+from blocks.molformer_encoder import MolFormerEncoder
+
 def precompute_drug_features(
     smiles_list: List[str],
-    morgan_bits: int = 2048,
-    n_descriptors: int = 200
+    max_length: int = 128,
+    d_model: int = 256,
+    batch_size: int = 64,
+    model_name: str = "ibm-research/MoLFormer-XL-both-10pct",
+    device: str = "cpu"
 ) -> Dict[str, Dict[str, torch.Tensor]]:
-    """Precompute Morgan fingerprints (2048-bit) and RDKit descriptors (200 continuous) for all unique SMILES.
+    """Precompute Pretrained IBM MolFormer embeddings and token IDs for all unique SMILES.
 
     Args:
         smiles_list: List of unique SMILES strings.
-        morgan_bits: Dimension of Morgan fingerprint bit vector (default=2048).
-        n_descriptors: Number of physical descriptors (default=200).
+        max_length: Token sequence max length (default=128).
+        d_model: Latent projected embedding dimension (default=256).
+        batch_size: Inference batch size (default=64).
+        model_name: Pretrained Hugging Face model identifier.
+        device: Calculation device ('cpu' or 'cuda').
 
     Returns:
-        Dict[str, Dict[str, torch.Tensor]]: Feature dictionary keyed by SMILES string containing 'morgan' and 'descriptors'.
+        Dict[str, Dict[str, torch.Tensor]]: Pretrained MolFormer feature store keyed by SMILES string.
     """
-    preprocessor = MolecularPreprocessor(morgan_nbits=morgan_bits, morgan_radius=2)
+    logger.info(f"Loading HuggingFace AutoTokenizer for '{model_name}'...")
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+
+    logger.info(f"Loading Pretrained MolFormerEncoder '{model_name}' (use_pretrained=True)...")
+    molformer_encoder = MolFormerEncoder(
+        d_model=d_model,
+        use_pretrained=True,
+        model_name=model_name
+    )
+    molformer_encoder.eval()
+    molformer_encoder.to(device)
+
     feature_store: Dict[str, Dict[str, torch.Tensor]] = {}
 
-    logger.info(f"Computing Morgan ({morgan_bits}-bit) + RDKit Descriptors ({n_descriptors}) for {len(smiles_list)} unique SMILES...")
+    logger.info(f"Computing Pretrained IBM MolFormer embeddings (ONLY) for {len(smiles_list)} unique SMILES on device '{device}'...")
 
-    for idx, smiles in enumerate(smiles_list):
-        if (idx + 1) % 500 == 0 or (idx + 1) == len(smiles_list):
-            logger.info(f"Processing SMILES [{idx + 1}/{len(smiles_list)}]...")
+    with torch.no_grad():
+        for i in range(0, len(smiles_list), batch_size):
+            batch_smiles = smiles_list[i : i + batch_size]
+            if (i + batch_size) % 500 < batch_size or i + batch_size >= len(smiles_list):
+                logger.info(f"Processing SMILES batch [{min(i + batch_size, len(smiles_list))}/{len(smiles_list)}]...")
 
-        morgan, desc, _ = preprocessor.process_smiles(smiles)
-        morgan_t = torch.from_numpy(morgan).float() if isinstance(morgan, np.ndarray) else morgan.float()
-        desc_t = torch.from_numpy(desc).float() if isinstance(desc, np.ndarray) else desc.float()
+            encoded = tokenizer(
+                batch_smiles,
+                max_length=max_length,
+                padding="max_length",
+                truncation=True,
+                return_tensors="pt"
+            )
+            input_ids = encoded["input_ids"].to(device)
+            attention_mask = encoded["attention_mask"].to(device)
 
-        feature_store[smiles] = {
-            "morgan": morgan_t,
-            "descriptors": desc_t
-        }
+            seq_feats, pooled_emb = molformer_encoder(input_ids, attention_mask)
+
+            for idx, smiles in enumerate(batch_smiles):
+                feature_store[smiles] = {
+                    "token_ids": input_ids[idx].cpu(),
+                    "token_mask": attention_mask[idx].cpu(),
+                    "molformer_emb": pooled_emb[idx].cpu()
+                }
 
     return feature_store
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Precompute and Save Morgan + RDKit Molecular Features for CancerCombo (Ablation 2)")
+    parser = argparse.ArgumentParser(description="Precompute and Save Pretrained IBM MolFormer-Only Features for CancerCombo")
     parser.add_argument("--input_csv", type=str, default="data/scenario1_combination_50k.csv", help="Path to input CSV/ZIP.")
-    parser.add_argument("--output_file", type=str, default="data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pt", help="Output .pt feature file.")
+    parser.add_argument("--output_file", type=str, default="data/features/pretrained_molformer_only/drug_features_pretrained_molformer.pt", help="Output .pt feature file.")
+    parser.add_argument("--model_name", type=str, default="ibm-research/MoLFormer-XL-both-10pct", help="Pretrained model identifier.")
     args = parser.parse_args()
 
     os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
@@ -146,7 +200,8 @@ def main():
         logger.warning("No SMILES found.")
         return
 
-    feature_store = precompute_drug_features(smiles_list)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    feature_store = precompute_drug_features(smiles_list, model_name=args.model_name, device=device)
 
     # Save as PyTorch .pt file
     torch.save(feature_store, args.output_file)

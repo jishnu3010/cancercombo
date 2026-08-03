@@ -19,7 +19,10 @@ class SynergyPredictor:
         # Strip PyTorch Lightning 'model.' prefix if present
         state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
         
-        self.model.load_state_dict(state_dict)
+        incompatible = self.model.load_state_dict(state_dict, strict=False)
+        trainable_missing = [k for k in incompatible.missing_keys if not k.startswith("molformer_enc.pretrained_")]
+        if trainable_missing:
+            raise RuntimeError(f"Checkpoint is missing required trainable keys: {trainable_missing}")
         self.model.to(self.device)
         self.model.eval()
         
@@ -50,10 +53,17 @@ class SynergyPredictor:
         morgan_a, desc_a, _ = self.preprocessor.process_smiles(smiles_a)
         morgan_b, desc_b, _ = self.preprocessor.process_smiles(smiles_b)
         
+        ids_a, mask_a = self.tokenizer.tokenize(smiles_a)
+        ids_b, mask_b = self.tokenizer.tokenize(smiles_b)
+        
         # Prepare inputs
+        t_ids_a = torch.tensor([ids_a], dtype=torch.long, device=self.device)
+        t_mask_a = torch.tensor([mask_a], dtype=torch.float32, device=self.device)
         t_morgan_a = torch.tensor(np.array([morgan_a]), dtype=torch.float32, device=self.device)
         t_desc_a = torch.tensor(np.array([desc_a]), dtype=torch.float32, device=self.device)
         
+        t_ids_b = torch.tensor([ids_b], dtype=torch.long, device=self.device)
+        t_mask_b = torch.tensor([mask_b], dtype=torch.float32, device=self.device)
         t_morgan_b = torch.tensor(np.array([morgan_b]), dtype=torch.float32, device=self.device)
         t_desc_b = torch.tensor(np.array([desc_b]), dtype=torch.float32, device=self.device)
         
@@ -63,9 +73,9 @@ class SynergyPredictor:
         
         with torch.no_grad():
             y_pred, params = self.model(
-                drug_a_morgan=t_morgan_a, drug_a_desc=t_desc_a,
-                drug_b_morgan=t_morgan_b, drug_b_desc=t_desc_b,
-                cell_line=t_cell, doses_a=t_doses_a, doses_b=t_doses_b
+                t_ids_a, t_mask_a, t_morgan_a, t_desc_a,
+                t_ids_b, t_mask_b, t_morgan_b, t_desc_b,
+                t_cell, t_doses_a, t_doses_b
             )
             
         e1, e2, e3, log_c1, log_c2, h1, h2, alpha = params
@@ -85,4 +95,3 @@ class SynergyPredictor:
                 "alpha": float(alpha.item())
             }
         }
-

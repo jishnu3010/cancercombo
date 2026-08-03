@@ -10,8 +10,8 @@ model:
   cell_in_dim: 976
   use_pathway_projection: true
   n_pathways: 300
-  molformer_model_name: "ibm/MoLFormer-XL-CIMA-100M"
-  use_pretrained_molformer: false
+  molformer_model_name: "ibm-research/MoLFormer-XL-both-10pct"
+  use_pretrained_molformer: true
 
   enable_drug_drug_attention: false
   use_symmetric_fusion: false
