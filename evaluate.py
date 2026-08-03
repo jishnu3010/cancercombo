@@ -197,6 +197,10 @@ def run_evaluation(checkpoint_path: str = "checkpoints/deepsynba_morgan_rdkit/ca
 
     if not os.path.exists(checkpoint_path):
         candidate_paths = [
+            os.path.join(t_config.checkpoint_dir, "cancercombo_best.ckpt"),
+            os.path.join(t_config.checkpoint_dir, "epoch_200.ckpt"),
+            "checkpoints/ablation2_drug_drug_attention/cancercombo_best.ckpt",
+            "checkpoints/ablation2_drug_drug_attention/epoch_200.ckpt",
             "checkpoints/deepsynba_drug_drug_attention/cancercombo_best.ckpt",
             "checkpoints/ablation3_no_attention/cancercombo_best.ckpt",
             "checkpoints/deepsynba_morgan_rdkit/epoch_200.ckpt",
@@ -226,8 +230,9 @@ def run_evaluation(checkpoint_path: str = "checkpoints/deepsynba_morgan_rdkit/ca
     incompatible = model.load_state_dict(state_dict, strict=False)
     trainable_missing = [k for k in incompatible.missing_keys if not k.startswith("molformer_enc.pretrained_")]
     if trainable_missing:
-        logger.error(f"Missing trainable keys in checkpoint: {trainable_missing}")
-        raise RuntimeError(f"Checkpoint is missing required trainable keys: {trainable_missing}")
+        logger.error(f"Missing trainable keys in checkpoint '{checkpoint_path}': {trainable_missing}")
+        logger.error("HINT: Ensure you are loading the checkpoint from your latest training run (e.g. --checkpoint checkpoints/ablation2_drug_drug_attention/cancercombo_best.ckpt or epoch_200.ckpt).")
+        raise RuntimeError(f"Checkpoint '{checkpoint_path}' is missing required trainable keys. Ensure you specify the correct checkpoint path corresponding to your training run.")
     logger.info("Successfully loaded all trained CancerCombo parameters from checkpoint.")
     
     evaluator = ModelEvaluator(device=device)
