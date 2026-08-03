@@ -209,6 +209,7 @@ def run_evaluation(checkpoint_path: str = "checkpoints/deepsynba_morgan_rdkit/ca
 
     if not os.path.exists(checkpoint_path):
         candidate_paths = [
+            "checkpoints/deepsynba_drug_drug_attention/cancercombo_best.ckpt",
             "checkpoints/ablation3_no_attention/cancercombo_best.ckpt",
             "checkpoints/deepsynba_morgan_rdkit/epoch_200.ckpt",
             "checkpoints/deepsynba_morgan_rdkit/cancercombo_best.ckpt",
