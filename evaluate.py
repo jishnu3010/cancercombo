@@ -60,20 +60,36 @@ class ModelEvaluator:
 # NEW CODE - MOLFORMER-ONLY ABLATION
 # ============================================================
         with torch.no_grad():
-            for batch in dataloader:
+            for batch_idx, batch in enumerate(dataloader):
                 b_gpu = {k: v.to(self.device, non_blocking=True) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
                 viability = b_gpu.get("viability", b_gpu.get("viability_matrix"))
 
+                da_m = b_gpu.get("drug_a_morgan")
+                db_m = b_gpu.get("drug_b_morgan")
+                da_d = b_gpu.get("drug_a_desc")
+                db_d = b_gpu.get("drug_b_desc")
+                cell = b_gpu.get("cell_line")
+
+                if batch_idx == 0:
+                    da_m_str = tuple(da_m.shape) if da_m is not None else None
+                    db_m_str = tuple(db_m.shape) if db_m is not None else None
+                    da_d_str = tuple(da_d.shape) if da_d is not None else None
+                    db_d_str = tuple(db_d.shape) if db_d is not None else None
+                    cell_str = tuple(cell.shape) if cell is not None else None
+                    print(f"[EVAL DIAGNOSTICS] drug_a_morgan shape : {da_m_str}")
+                    print(f"[EVAL DIAGNOSTICS] drug_b_morgan shape : {db_m_str}")
+                    print(f"[EVAL DIAGNOSTICS] drug_a_desc shape   : {da_d_str}")
+                    print(f"[EVAL DIAGNOSTICS] drug_b_desc shape   : {db_d_str}")
+                    print(f"[EVAL DIAGNOSTICS] cell_line shape     : {cell_str}")
+
                 y_pred, _ = model(
-                    drug_a_ids=b_gpu.get("drug_a_ids"),
-                    drug_a_mask=b_gpu.get("drug_a_mask"),
-                    drug_b_ids=b_gpu.get("drug_b_ids"),
-                    drug_b_mask=b_gpu.get("drug_b_mask"),
-                    cell_line=b_gpu.get("cell_line"),
+                    drug_a_morgan=da_m,
+                    drug_a_desc=da_d,
+                    drug_b_morgan=db_m,
+                    drug_b_desc=db_d,
+                    cell_line=cell,
                     doses_a=b_gpu.get("doses_a"),
-                    doses_b=b_gpu.get("doses_b"),
-                    drug_a_emb=b_gpu.get("drug_a_emb"),
-                    drug_b_emb=b_gpu.get("drug_b_emb"),
+                    doses_b=b_gpu.get("doses_b")
                 )
 
                 preds_list.append(y_pred.cpu().numpy())
