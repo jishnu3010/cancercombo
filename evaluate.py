@@ -111,7 +111,7 @@ def run_evaluation(checkpoint_path: str = "checkpoints/deepsynba_morgan_rdkit/ca
     logger = setup_logger("CancerCombo Eval")
     logger.info("Setting up configs and real held-out evaluation dataset...")
     
-    m_config, _ = load_config(config_path)
+    m_config, t_config = load_config(config_path)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     # Configure PyTorch CUDA backends to avoid hangs/deadlocks on GPU container setups
