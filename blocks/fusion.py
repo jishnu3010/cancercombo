@@ -19,6 +19,9 @@ class AttentionMultiRepresentationFusion(nn.Module):
         self.out_proj = nn.Linear(d_model, d_model)
         
         self.attn_dropout = nn.Dropout(dropout)
+        
+        # Learnable linear pooling layer (fuses 2 representations: Morgan Fingerprints and RDKit Descriptors)
+        self.pooling = nn.Linear(2 * d_model, d_model)
         self.norm = nn.LayerNorm(d_model)
         
     def forward(self, morgan_emb: torch.Tensor, descriptor_emb: torch.Tensor) -> torch.Tensor:
@@ -51,8 +54,9 @@ class AttentionMultiRepresentationFusion(nn.Module):
         attn_out = attn_out.transpose(1, 2).contiguous().view(B, seq_len, self.d_model)
         attn_out = self.out_proj(attn_out)
         
-        # 1. Mean Pooling across stacked representation sequence (seq_len=2)
-        fusion_output = attn_out.mean(dim=1) # (B, d_model)
+        # 1. Flatten and apply learnable linear pooling (matching CancerCombo1 pattern)
+        flat_attn = attn_out.reshape(B, -1) # (B, 2 * d_model)
+        fusion_output = self.pooling(flat_attn) # (B, d_model)
 
         # 2. Symmetric Residual Connection (Equal contribution from Morgan and RDKit Descriptors)
         residual = (morgan_emb + descriptor_emb) / 2.0 # (B, d_model)
