@@ -13,7 +13,7 @@ model:
   molformer_model_name: "ibm-research/MoLFormer-XL-both-10pct"
   use_pretrained_molformer: false
 
-  enable_drug_drug_attention: false
+  enable_drug_drug_attention: true
   use_symmetric_fusion: false
   e_min: 0.0
   e_max: 100.0
@@ -36,7 +36,7 @@ training:
 
   weight_decay: 1.0e-5
   device: "cuda"
-  checkpoint_dir: "checkpoints/deepsynba_drug_drug_attention"
+  checkpoint_dir: "checkpoints/ablation2_drug_drug_attention"
   save_top_k: 3
   num_workers: 0
   seed: 42

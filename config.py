@@ -9,7 +9,6 @@ from typing import Dict, Any
 @dataclass
 class ModelConfig:
     d_model: int
-    emb_size: int
     n_heads: int
     d_ff: int
     dropout: float
@@ -31,6 +30,7 @@ class ModelConfig:
     h_max: float
     alpha_min: float
     alpha_max: float
+    emb_size: int = 1024
 
 @dataclass
 class TrainingConfig:
@@ -99,7 +99,6 @@ def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, Training
     # Ensure types are correct from YAML loading
     model_config = ModelConfig(
         d_model=int(model_data["d_model"]),
-        emb_size=int(model_data.get("emb_size", 1024)),
         n_heads=int(model_data["n_heads"]),
         d_ff=int(model_data["d_ff"]),
         dropout=float(model_data["dropout"]),
@@ -120,7 +119,8 @@ def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, Training
         h_min=float(model_data["h_min"]),
         h_max=float(model_data["h_max"]),
         alpha_min=float(model_data["alpha_min"]),
-        alpha_max=float(model_data["alpha_max"])
+        alpha_max=float(model_data["alpha_max"]),
+        emb_size=int(model_data.get("emb_size", 1024))
     )
     
     training_config = TrainingConfig(

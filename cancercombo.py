@@ -108,4 +108,4 @@ class CancerCombo(nn.Module):
         # 7. Solve 2D Dose-Response Matrix with Bivariate Hill Equation Solver
         y_pred = self.hill_solver(doses_a, doses_b, e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
 
-        return y_pred, (e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
+        return y_pred, (e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
