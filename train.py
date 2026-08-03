@@ -185,7 +185,7 @@ def run_training(
     else:
         logger.info("No precomputed drug feature store found. Falling back to on-the-fly preprocessing.")
     
-    t_config.checkpoint_dir = "checkpoints/ablation2_morgan_rdkit"
+    t_config.checkpoint_dir = "checkpoints/deepsynba_morgan_rdkit"
 
     train_dataset = DrugComboDataset(
         train_data, cell_features, drug_feature_store=drug_features,

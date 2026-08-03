@@ -2,109 +2,55 @@ import torch
 import torch.nn as nn
 from typing import Tuple
 
-from blocks.molformer_encoder import MolFormerEncoder
-from blocks.morgan_encoder import MorganEncoder
-from blocks.descriptor_encoder import DescriptorEncoder
-from blocks.fusion import AttentionMultiRepresentationFusion
-from blocks.cell_encoder import CellLineEncoder
-from blocks.drug_cell_attention import DrugCellCrossAttention
-from blocks.drug_drug_attention import DrugDrugCrossAttention
-from blocks.shared_feature import SymmetricComboFusion
+from blocks.drug_cell_encoder import DeepSynBaDrugCellEncoder
 from blocks.prediction_heads import CancerComboPredictionHeads
 from blocks.hill_equation import BivariateHillSolver
 
 class CancerCombo(nn.Module):
-    """Complete, modular CancerCombo architecture for dose-response prediction.
+    """DeepSynBa-inspired architecture for dose-response surface prediction.
     
-    Integrates SMILES MolFormer sequence encoding, Morgan and continuous Descriptor encoders,
-    Attention Multi-Representation Fusion, Pathway Cell Line Encoder, Drug-Cell Cross Attention,
-    Symmetric Combo Fusion for exact permutation invariance, constrained Prediction Heads,
-    and numerically stable Bivariate Hill Solver.
+    Processes multi-modal drug features (Morgan fingerprints + RDKit continuous descriptors)
+    concatenated with landmark transcriptomic cell features via DeepSynBa Drug-Cell Encoder MLPs,
+    concatenates dual drug representations into a unified feature representation, predicts biophysical
+    Hill parameters using DeepSynBa Prediction Heads, and computes dose-response matrices via
+    the Bivariate Hill Equation Solver.
     """
     
     def __init__(self, config):
         super().__init__()
         self.config = config
-        d_model = config.d_model
+        d_model = getattr(config, "d_model", 256)
         
-        # 1. SMILES & Molecular Encoders
-# ============================================================
-# ABLATION 1 - MOLFORMER ONLY
-# DISABLED FOR ABLATION 2
-# ============================================================
-#         self.molformer_enc = MolFormerEncoder(
-#             d_model=d_model,
-#             vocab_size=100,
-#             nhead=config.n_heads,
-#             dim_feedforward=config.d_ff,
-#             dropout=config.dropout,
-#             use_pretrained=getattr(config, "use_pretrained_molformer", False),
-#             model_name=getattr(config, "molformer_model_name", "ibm/MoLFormer-XL-CIMA-100M")
-#         )
-
-# ============================================================
-# ABLATION 2 - MORGAN + RDKIT DESCRIPTORS ONLY
-# ACTIVE
-# ============================================================
-        # Morgan fingerprint encoder block
-        self.morgan_enc = MorganEncoder(
-            in_dim=config.morgan_in_dim,
+        morgan_dim = getattr(config, "morgan_in_dim", 2048)
+        descriptor_dim = getattr(config, "descriptor_in_dim", 200)
+        cell_dim = getattr(config, "cell_in_dim", 976)
+        in_dim = morgan_dim + descriptor_dim + cell_dim # 2048 + 200 + 976 = 3224
+        
+        # 1. DeepSynBa Drug-Cell Encoder MLP
+        self.drug_cell_encoder = DeepSynBaDrugCellEncoder(
+            in_dim=in_dim,
             d_model=d_model,
-            dropout=config.dropout
-        )
-        # Continuous molecular descriptor encoder block
-        self.descriptor_enc = DescriptorEncoder(
-            in_dim=config.descriptor_in_dim,
-            d_model=d_model,
-            dropout=config.dropout
+            dropout=getattr(config, "dropout", 0.2)
         )
 
-        # 2. Multi-Head Self-Attention Fusion Block (Fuses Morgan + Descriptors)
-        self.fusion = AttentionMultiRepresentationFusion(
-            d_model=d_model,
-            n_heads=config.n_heads,
-            dropout=config.dropout
-        )
-        
-        # 3. Transcriptomic Pathway Cell Line Encoder
-        self.cell_enc = CellLineEncoder(
-            in_dim=config.cell_in_dim,
-            d_model=d_model,
-            n_pathways=config.n_pathways,
-            use_pathway_projection=config.use_pathway_projection,
-            dropout=config.dropout
-        )
-        
-        # 4. Drug-Cell Cross-Attention Block (Phase 5)
-        # Drug embedding attends to pathway cell tokens
-        self.drug_cell_attn = DrugCellCrossAttention(
-            d_model=d_model,
-            n_heads=config.n_heads,
-            dropout=config.dropout
-        )
-        
-        # 5. Optional Mutual Drug-Drug Attention
-        if getattr(config, "enable_drug_drug_attention", False):
-            self.drug_drug_attn = DrugDrugCrossAttention(
-                d_model=d_model,
-                n_heads=config.n_heads,
-                dropout=config.dropout
-            )
-            
-        # 6. Symmetric Combination Fusion Block (Phase 6)
-        # Enforces mathematical permutation invariance when swapping Drug A and Drug B
-        self.symmetric_fusion = SymmetricComboFusion(
-            d_model=d_model,
-            dropout=config.dropout
-        )
-        
-        # 7. Constrained Biophysical Prediction Heads (Phase 7)
-        # Sigmoid transforms project outputs to biological parameter boundaries
+        # 2. DeepSynBa Prediction Heads for Bivariate Hill parameters
         self.heads = CancerComboPredictionHeads(config)
         
-        # 8. Numerically Stable Bivariate Hill Solver with Masking (Phase 1 & Phase 8)
-        # Masked Hill equation solver preserving zero-dose controls and non-zero gradients
+        # 3. Bivariate Hill Solver
         self.hill_solver = BivariateHillSolver(e0=100.0)
+
+#######################################################
+# OLD CODE - CANCERCOMBO ATTENTION
+#######################################################
+#         self.morgan_enc = MorganEncoder(...)
+#         self.descriptor_enc = DescriptorEncoder(...)
+#         self.fusion = AttentionMultiRepresentationFusion(...)
+#         self.cell_enc = CellLineEncoder(...)
+#         self.drug_cell_attn = DrugCellCrossAttention(...)
+#         if getattr(config, "enable_drug_drug_attention", False):
+#             self.drug_drug_attn = DrugDrugCrossAttention(...)
+#         self.symmetric_fusion = SymmetricComboFusion(...)
+#######################################################
 
     def forward(
         self,
@@ -113,57 +59,47 @@ class CancerCombo(nn.Module):
         cell_line=None, doses_a=None, doses_b=None,
         drug_a_emb=None, drug_b_emb=None
     ):
-# ============================================================
-# ABLATION 1 - MOLFORMER ONLY
-# DISABLED FOR ABLATION 2
-# ============================================================
-#         if drug_a_emb is not None:
-#             pooled_a = drug_a_emb
-#         else:
-#             _, pooled_a = self.molformer_enc(drug_a_ids, drug_a_mask)
-#         fused_a = self.fusion(pooled_a)
+#######################################################
+# OLD CODE - CANCERCOMBO ATTENTION
+#######################################################
+#         morgan_a = self.morgan_enc(drug_a_morgan)
+#         desc_a = self.descriptor_enc(drug_a_desc)
+#         fused_a = self.fusion(morgan_a, desc_a)
 #
-#         if drug_b_emb is not None:
-#             pooled_b = drug_b_emb
+#         morgan_b = self.morgan_enc(drug_b_morgan)
+#         desc_b = self.descriptor_enc(drug_b_desc)
+#         fused_b = self.fusion(morgan_b, desc_b)
+#         
+#         cell_features = self.cell_enc(cell_line)
+#         cond_a = self.drug_cell_attn(fused_a, cell_features)
+#         cond_b = self.drug_cell_attn(fused_b, cell_features)
+#         
+#         if hasattr(self, "drug_drug_attn") and getattr(self.config, "enable_drug_drug_attention", False):
+#             aware_a, aware_b = self.drug_drug_attn(cond_a, cond_b)
 #         else:
-#             _, pooled_b = self.molformer_enc(drug_b_ids, drug_b_mask)
-#         fused_b = self.fusion(pooled_b)
+#             aware_a, aware_b = cond_a, cond_b
+#             
+#         z_combo = self.symmetric_fusion(aware_a, aware_b)
+#         e1, e2, e3, log_c1, log_c2, h1, h2, alpha = self.heads(aware_a, aware_b, z_combo)
+#######################################################
 
-# ============================================================
-# ABLATION 2 - MORGAN + RDKIT DESCRIPTORS ONLY
-# ACTIVE
-# ============================================================
-        # 1. Encode Drug A using Morgan + RDKit Descriptors ONLY
-        morgan_a = self.morgan_enc(drug_a_morgan)
-        desc_a = self.descriptor_enc(drug_a_desc)
-        fused_a = self.fusion(morgan_a, desc_a)
+        # 1. Concatenate Drug A (Morgan + RDKit Descriptors) and Cell Line Gene Expression
+        in_a = torch.cat([drug_a_morgan, drug_a_desc, cell_line], dim=1) # (B, 3224)
 
-        # 2. Encode Drug B using Morgan + RDKit Descriptors ONLY
-        morgan_b = self.morgan_enc(drug_b_morgan)
-        desc_b = self.descriptor_enc(drug_b_desc)
-        fused_b = self.fusion(morgan_b, desc_b)
-        
-        # 3. Encode Cell Line pathway embeddings
-        cell_features = self.cell_enc(cell_line)
-        
-        # 4. Cross-attend Drug representations onto Cell Line tokens
-        cond_a = self.drug_cell_attn(fused_a, cell_features)
-        cond_b = self.drug_cell_attn(fused_b, cell_features)
-        
-        # 5. Mutual Drug-Drug Attention (if enabled)
-        if hasattr(self, "drug_drug_attn") and getattr(self.config, "enable_drug_drug_attention", False):
-            aware_a, aware_b = self.drug_drug_attn(cond_a, cond_b)
-        else:
-            aware_a, aware_b = cond_a, cond_b
-            
-        # 6. Symmetric Fusion for Permutation Invariance
-        z_combo = self.symmetric_fusion(aware_a, aware_b)
-        
-        # 7. Predict Constrained Pharmacological Parameters
-        e1, e2, e3, log_c1, log_c2, h1, h2, alpha = self.heads(aware_a, aware_b, z_combo)
-        
-        # 8. Solve 2D Dose-Response Matrix with Bivariate Hill Equation Solver
+        # 2. Concatenate Drug B (Morgan + RDKit Descriptors) and Cell Line Gene Expression
+        in_b = torch.cat([drug_b_morgan, drug_b_desc, cell_line], dim=1) # (B, 3224)
+
+        # 3. Pass through DeepSynBa Drug-Cell Encoder MLPs
+        rep_a = self.drug_cell_encoder(in_a) # (B, d_model)
+        rep_b = self.drug_cell_encoder(in_b) # (B, d_model)
+
+        # 4. Concatenate Drug A + Drug B into Unified Representation
+        unified_rep = torch.cat([rep_a, rep_b], dim=1) # (B, 2 * d_model) = (B, 512)
+
+        # 5. Predict Biophysical Parameters with DeepSynBa Prediction Heads
+        e1, e2, e3, log_c1, log_c2, h1, h2, alpha = self.heads(unified_rep)
+
+        # 6. Solve 2D Dose-Response Matrix with Bivariate Hill Equation Solver
         y_pred = self.hill_solver(doses_a, doses_b, e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
-        
+
         return y_pred, (e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
-

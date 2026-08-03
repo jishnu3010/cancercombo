@@ -9,6 +9,7 @@ from typing import Dict, Any
 @dataclass
 class ModelConfig:
     d_model: int
+    emb_size: int
     n_heads: int
     d_ff: int
     dropout: float
@@ -98,6 +99,7 @@ def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, Training
     # Ensure types are correct from YAML loading
     model_config = ModelConfig(
         d_model=int(model_data["d_model"]),
+        emb_size=int(model_data.get("emb_size", 1024)),
         n_heads=int(model_data["n_heads"]),
         d_ff=int(model_data["d_ff"]),
         dropout=float(model_data["dropout"]),
@@ -127,7 +129,7 @@ def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, Training
         lr=float(training_data["lr"]),
         weight_decay=float(training_data["weight_decay"]),
         device=str(training_data.get("device", "cuda")),
-        checkpoint_dir=str(training_data.get("checkpoint_dir", "checkpoints/ablation2_morgan_rdkit")),
+        checkpoint_dir=str(training_data.get("checkpoint_dir", "checkpoints/deepsynba_morgan_rdkit")),
         save_top_k=int(training_data.get("save_top_k", 3)),
         num_workers=int(training_data.get("num_workers", 0)),
         seed=int(training_data.get("seed", 42)),

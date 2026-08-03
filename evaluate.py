@@ -83,7 +83,7 @@ class ModelEvaluator:
 
         return calculate_metrics(preds, trues)
 
-def run_evaluation(checkpoint_path: str = "checkpoints/ablation2_morgan_rdkit/cancercombo_best.ckpt", config_path: str = "config.yaml", scenario: int = 1):
+def run_evaluation(checkpoint_path: str = "checkpoints/deepsynba_morgan_rdkit/cancercombo_best.ckpt", config_path: str = "config.yaml", scenario: int = 1):
     """Load model checkpoint and evaluate performance.
 
     Args:
