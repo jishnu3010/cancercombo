@@ -7,7 +7,7 @@ class DeepSynBaDrugCellEncoder(nn.Module):
     Processes concatenated drug features (Morgan + RDKit Descriptors) and cell line gene expression.
     """
     
-    def __init__(self, in_dim: int = 3224, d_model: int = 256, dropout: float = 0.2):
+    def __init__(self, in_dim: int = 1232, d_model: int = 256, dropout: float = 0.2):
         super().__init__()
         self.encoder = nn.Sequential(
             nn.Linear(in_dim, d_model),

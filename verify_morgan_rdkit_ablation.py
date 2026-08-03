@@ -127,7 +127,7 @@ def run_verification():
 
     # 6. One-Batch Model Forward Pass Test
     config = ModelConfig(
-        d_model=256, n_heads=4, d_ff=512, dropout=0.1,
+        d_model=256, emb_size=1024, n_heads=4, d_ff=512, dropout=0.1,
         molformer_in_dim=768, morgan_in_dim=2048, descriptor_in_dim=200,
         cell_in_dim=976, use_pathway_projection=True, n_pathways=300,
         molformer_model_name="ibm/MoLFormer-XL-CIMA-100M", use_pretrained_molformer=False,
