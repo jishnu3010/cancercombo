@@ -32,14 +32,10 @@ class CancerComboLightningModule(pl.LightningModule):
         
     def forward(self, batch: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, Tuple[torch.Tensor, ...]]:
         return self.model(
-            drug_a_ids=batch["drug_a_ids"],
-            drug_a_mask=batch["drug_a_mask"],
-            drug_a_morgan=batch["drug_a_morgan"],
-            drug_a_desc=batch["drug_a_desc"],
-            drug_b_ids=batch["drug_b_ids"],
-            drug_b_mask=batch["drug_b_mask"],
-            drug_b_morgan=batch["drug_b_morgan"],
-            drug_b_desc=batch["drug_b_desc"],
+            drug_a_morgan=batch.get("drug_a_morgan"),
+            drug_a_desc=batch.get("drug_a_desc"),
+            drug_b_morgan=batch.get("drug_b_morgan"),
+            drug_b_desc=batch.get("drug_b_desc"),
             cell_line=batch["cell_line"],
             doses_a=batch["doses_a"],
             doses_b=batch["doses_b"]
