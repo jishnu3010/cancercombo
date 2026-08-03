@@ -13,7 +13,7 @@ model:
   molformer_model_name: "ibm-research/MoLFormer-XL-both-10pct"
   use_pretrained_molformer: false
 
-  enable_drug_drug_attention: false
+  enable_drug_drug_attention: true
   use_symmetric_fusion: false
   e_min: 0.0
   e_max: 100.0
