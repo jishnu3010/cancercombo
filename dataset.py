@@ -376,6 +376,29 @@ class DrugComboDataset(Dataset):
             return encoded["input_ids"], encoded["attention_mask"]
         return self.tokenizer.tokenize(smiles)
         
+    def _get_drug_features(self, smiles: str) -> Tuple[Any, Any]:
+        feat = self.drug_feature_store.get(smiles) if self.drug_feature_store else None
+        morgan, desc = None, None
+        if feat is not None:
+            if isinstance(feat, dict):
+                morgan = feat.get("morgan", feat.get("morgan_fp", feat.get("fingerprint")))
+                desc = feat.get("descriptors", feat.get("desc"))
+            elif isinstance(feat, (tuple, list)) and len(feat) >= 2:
+                morgan, desc = feat[0], feat[1]
+
+        if morgan is None or desc is None:
+            if smiles not in self._dynamic_cache:
+                m_fp, d_vec, _ = self.preprocessor.process_smiles(smiles)
+                self._dynamic_cache[smiles] = (m_fp, d_vec)
+            morgan, desc = self._dynamic_cache[smiles]
+
+        if morgan is None:
+            morgan = np.zeros(2048, dtype=np.float32)
+        if desc is None:
+            desc = np.zeros(200, dtype=np.float32)
+
+        return morgan, desc
+
     def __len__(self) -> int:
         return len(self.data)
         
@@ -389,49 +412,8 @@ class DrugComboDataset(Dataset):
         viability = np.array(item['viability_matrix'], dtype=np.float32)
         
         # Calculate or retrieve chemical representations
-# ============================================================
-# OLD CODE - DISABLED FOR MOLFORMER-ONLY ABLATION
-# ============================================================
-#         feat_a = self.drug_feature_store.get(smiles_a)
-#         feat_b = self.drug_feature_store.get(smiles_b)
-#         if feat_a is not None:
-#             morgan_a = feat_a["morgan"] if isinstance(feat_a, dict) else feat_a[0]
-#             desc_a = feat_a["descriptors"] if isinstance(feat_a, dict) else feat_a[1]
-#             ids_a = feat_a["token_ids"] if isinstance(feat_a, dict) else feat_a[2]
-#             mask_a = feat_a["token_mask"] if isinstance(feat_a, dict) else feat_a[3]
-#         else:
-#             cache_key_a = (smiles_a, self.use_pretrained_molformer)
-#             if cache_key_a not in self._dynamic_cache:
-#                 m_a, d_a, _ = self.preprocessor.process_smiles(smiles_a)
-#                 i_a, mk_a = self._tokenize_smiles(smiles_a)
-#                 self._dynamic_cache[cache_key_a] = (m_a, d_a, i_a, mk_a)
-#             morgan_a, desc_a, ids_a, mask_a = self._dynamic_cache[cache_key_a]
-
-# ============================================================
-# NEW CODE - MOLFORMER-ONLY ABLATION
-# ============================================================
-        feat_a = self.drug_feature_store.get(smiles_a)
-        feat_b = self.drug_feature_store.get(smiles_b)
-
-        if feat_a is not None and "morgan" in feat_a and "descriptors" in feat_a:
-            morgan_a = feat_a["morgan"]
-            desc_a = feat_a["descriptors"]
-        else:
-            cache_key_a = smiles_a
-            if cache_key_a not in self._dynamic_cache:
-                m_a, d_a, _ = self.preprocessor.process_smiles(smiles_a)
-                self._dynamic_cache[cache_key_a] = (m_a, d_a)
-            morgan_a, desc_a = self._dynamic_cache[cache_key_a]
-
-        if feat_b is not None and "morgan" in feat_b and "descriptors" in feat_b:
-            morgan_b = feat_b["morgan"]
-            desc_b = feat_b["descriptors"]
-        else:
-            cache_key_b = smiles_b
-            if cache_key_b not in self._dynamic_cache:
-                m_b, d_b, _ = self.preprocessor.process_smiles(smiles_b)
-                self._dynamic_cache[cache_key_b] = (m_b, d_b)
-            morgan_b, desc_b = self._dynamic_cache[cache_key_b]
+        morgan_a, desc_a = self._get_drug_features(smiles_a)
+        morgan_b, desc_b = self._get_drug_features(smiles_b)
 
         # Get biological profile
         norm_cell = re.sub(r'[^A-Z0-9]', '', str(cell_name).upper())
