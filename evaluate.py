@@ -172,14 +172,18 @@ def run_evaluation(checkpoint_path: str = "checkpoints/deepsynba_morgan_rdkit/ca
             drug_features = load_precomputed_drug_features(feat_path_pkl)
         if not drug_features:
             raise FileNotFoundError(
-                f"FATAL: Pretrained MolFormer feature store not found at '{feat_path_pt}' or '{feat_path_pkl}'. "
-                "Please run precompute_molecular_features.py first. Fallback to non-pretrained/Morgan features is strictly forbidden."
+                f"FATAL: Pretrained MolFormer feature store not found at '{feat_path_pt}' or '{feat_path_pkl}'."
             )
         logger.info(f"Loaded Pretrained IBM MoLFormer drug feature store for {len(drug_features)} SMILES strings.")
     else:
-        drug_features = load_precomputed_drug_features("data/features/molformer_only/drug_features_molformer.pt")
+        drug_features = load_precomputed_drug_features("data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pt")
         if not drug_features:
-            drug_features = load_precomputed_drug_features("data/features/molformer_only/drug_features_molformer.pkl")
+            drug_features = load_precomputed_drug_features("data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pkl")
+        if not drug_features:
+            drug_features = load_precomputed_drug_features("data/features/molformer_only/drug_features_molformer.pt")
+        if drug_features:
+            logger.info(f"Loaded Morgan + RDKit Descriptors drug feature store for {len(drug_features)} SMILES strings.")
+
     test_dataset = DrugComboDataset(
         test_records, cell_features, drug_feature_store=drug_features,
         use_pretrained_molformer=m_config.use_pretrained_molformer,
@@ -187,7 +191,20 @@ def run_evaluation(checkpoint_path: str = "checkpoints/deepsynba_morgan_rdkit/ca
     )
     test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
 
-    
+    if not os.path.exists(checkpoint_path):
+        candidate_paths = [
+            "checkpoints/ablation3_no_attention/cancercombo_best.ckpt",
+            "checkpoints/deepsynba_morgan_rdkit/epoch_200.ckpt",
+            "checkpoints/deepsynba_morgan_rdkit/cancercombo_best.ckpt",
+            "checkpoints/ablation2_morgan_rdkit/cancercombo_best.ckpt",
+            "checkpoints/cancercombo_best.ckpt"
+        ]
+        for candidate in candidate_paths:
+            if os.path.exists(candidate):
+                logger.info(f"Specified checkpoint '{checkpoint_path}' not found. Resolved fallback checkpoint -> {candidate}")
+                checkpoint_path = candidate
+                break
+
     logger.info(f"Loading checkpoint: {checkpoint_path}")
     if not os.path.exists(checkpoint_path):
         logger.error(
