@@ -180,25 +180,13 @@ def run_evaluation(checkpoint_path: str = "checkpoints/deepsynba_morgan_rdkit/ca
 #     if not drug_features:
 #         drug_features = load_precomputed_drug_features("data/features/drug_features.pkl")
 
-    if getattr(m_config, "use_pretrained_molformer", False):
-        feat_path_pt = "data/features/pretrained_molformer_only/drug_features_pretrained_molformer.pt"
-        feat_path_pkl = "data/features/pretrained_molformer_only/drug_features_pretrained_molformer.pkl"
-        drug_features = load_precomputed_drug_features(feat_path_pt)
-        if not drug_features:
-            drug_features = load_precomputed_drug_features(feat_path_pkl)
-        if not drug_features:
-            raise FileNotFoundError(
-                f"FATAL: Pretrained MolFormer feature store not found at '{feat_path_pt}' or '{feat_path_pkl}'."
-            )
-        logger.info(f"Loaded Pretrained IBM MoLFormer drug feature store for {len(drug_features)} SMILES strings.")
-    else:
+    drug_features = load_precomputed_drug_features("data/features/drug_features.pt")
+    if not drug_features:
         drug_features = load_precomputed_drug_features("data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pt")
-        if not drug_features:
-            drug_features = load_precomputed_drug_features("data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pkl")
-        if not drug_features:
-            drug_features = load_precomputed_drug_features("data/features/molformer_only/drug_features_molformer.pt")
-        if drug_features:
-            logger.info(f"Loaded Morgan + RDKit Descriptors drug feature store for {len(drug_features)} SMILES strings.")
+    if not drug_features:
+        drug_features = load_precomputed_drug_features("data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pkl")
+    if drug_features:
+        logger.info(f"Loaded Morgan + RDKit Descriptors drug feature store for {len(drug_features)} SMILES strings.")
 
     test_dataset = DrugComboDataset(
         test_records, cell_features, drug_feature_store=drug_features,

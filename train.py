@@ -176,7 +176,9 @@ def run_training(
     val_data = parse_dataframe_to_records(val_df, known_gex_dict=real_gex)
     cell_features = real_gex
     
-    drug_features = load_precomputed_drug_features("data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pt")
+    drug_features = load_precomputed_drug_features("data/features/drug_features.pt")
+    if not drug_features:
+        drug_features = load_precomputed_drug_features("data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pt")
     if not drug_features:
         drug_features = load_precomputed_drug_features("data/features/morgan_rdkit_only/drug_features_morgan_rdkit.pkl")
 
