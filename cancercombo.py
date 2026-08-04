@@ -73,16 +73,6 @@ class CancerCombo(nn.Module):
         cond_a = self.drug_cell_attn(drug_emb_a, cell_emb) # (B, d_model)
         cond_b = self.drug_cell_attn(drug_emb_b, cell_emb) # (B, d_model)
 
-########################################################
-# OLD CODE - DeepSynBa Drug–Cell Encoder (MLP) & Drug–Drug Cross Attention
-########################################################
-#       in_a = torch.cat([drug_a_morgan, drug_a_desc, cell_line], dim=1) # (B, 3224)
-#       in_b = torch.cat([drug_b_morgan, drug_b_desc, cell_line], dim=1) # (B, 3224)
-#       rep_a = self.drug_cell_encoder(in_a) # (B, d_model)
-#       rep_b = self.drug_cell_encoder(in_b) # (B, d_model)
-#       aware_a, aware_b = self.drug_drug_attn(rep_a, rep_b) # (B, d_model), (B, d_model)
-#       enhanced_pair_rep = torch.cat([aware_a, aware_b], dim=1) # (B, 2 * d_model) = (B, 512)
-
         # 5. Direct Concatenation of Conditioned Drug Representations
         pair_rep = torch.cat([cond_a, cond_b], dim=1) # (B, 2 * d_model) = (B, 512)
 
