@@ -144,13 +144,11 @@ def run_training(
     
     # Map scenario number to split file path
     scenario_files = {
-        1: "data/scenario1_combination_50k.csv",
+        1: "data/splits/scenario1_combination.csv" if os.path.exists("data/splits/scenario1_combination.csv") else "data/scenario1_combination_50k.csv",
         2: "data/splits/scenario2_cell.csv",
         3: "data/splits/scenario3_drug.csv"
     }
     split_path = scenario_files.get(scenario, scenario_files[1])
-    if not os.path.exists(split_path) and os.path.exists("data/splits/scenario1_combination.csv"):
-        split_path = "data/splits/scenario1_combination.csv"
 
     if not os.path.exists(split_path):
         logger.error(f"Scenario split file not found: {split_path}. Run split_dataset.py first.")

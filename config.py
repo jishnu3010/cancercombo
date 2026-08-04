@@ -50,6 +50,14 @@ class TrainingConfig:
     min_lr: float = 1.0e-6
 
 
+def _to_bool(val: Any) -> bool:
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        return bool(val)
+    return str(val).strip().lower() in ("true", "1", "yes", "y", "t")
+
+
 def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, TrainingConfig]:
     """Loads configuration parameters from config.yaml and returns dataclass objects.
 
@@ -61,11 +69,13 @@ def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, Training
 
     Raises:
         FileNotFoundError: If the config file does not exist.
+        ValueError: If config dict structure is invalid.
+        KeyError: If required sections ('model', 'training') are missing.
     """
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found at: {config_path}")
         
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(config_path, "r", encoding="utf-8-sig") as f:
         if yaml is not None:
             config_dict = yaml.safe_load(f)
         else:
@@ -76,25 +86,56 @@ def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, Training
                 line_clean = line.split('#')[0].rstrip()
                 if not line_clean.strip():
                     continue
-                if not line.startswith(' ') and line_clean.endswith(':'):
-                    curr = line_clean.strip()[:-1]
+                if not line.startswith(' ') and not line.startswith('\t') and line_clean.endswith(':'):
+                    curr = line_clean.strip()[:-1].strip().lstrip('\ufeff')
                     config_dict[curr] = {}
                 elif curr and ':' in line_clean:
                     k, v = line_clean.split(':', 1)
-                    k = k.strip()
+                    k = k.strip().lstrip('\ufeff')
                     v = v.strip().strip('"').strip("'")
-                    if v.lower() == 'true': v = True
-                    elif v.lower() == 'false': v = False
+                    if v.lower() == 'true':
+                        v = True
+                    elif v.lower() == 'false':
+                        v = False
                     else:
                         try:
-                            if '.' in v or 'e' in v.lower(): v = float(v)
-                            else: v = int(v)
+                            if '.' in v or 'e' in v.lower():
+                                v = float(v)
+                            else:
+                                v = int(v)
                         except ValueError:
                             pass
                     config_dict[curr][k] = v
+
+    if not isinstance(config_dict, dict):
+        raise ValueError(f"Failed to parse config file at '{config_path}': content is not a dictionary.")
+
+    # Normalize top-level keys
+    config_dict = {
+        str(k).strip().lstrip('\ufeff'): v
+        for k, v in config_dict.items()
+    }
+
+    if "model" not in config_dict:
+        sections = list(config_dict.keys())
+        raise KeyError(f"Configuration file '{config_path}' missing required 'model' section. Available sections: {sections}")
+
+    if "training" not in config_dict:
+        sections = list(config_dict.keys())
+        raise KeyError(f"Configuration file '{config_path}' missing required 'training' section. Available sections: {sections}")
         
     model_data = config_dict["model"]
     training_data = config_dict["training"]
+
+    if isinstance(model_data, dict):
+        model_data = {str(k).strip().lstrip('\ufeff'): v for k, v in model_data.items()}
+    else:
+        raise ValueError(f"'model' section in config file '{config_path}' must be a key-value dictionary.")
+
+    if isinstance(training_data, dict):
+        training_data = {str(k).strip().lstrip('\ufeff'): v for k, v in training_data.items()}
+    else:
+        raise ValueError(f"'training' section in config file '{config_path}' must be a key-value dictionary.")
     
     # Ensure types are correct from YAML loading
     model_config = ModelConfig(
@@ -106,12 +147,12 @@ def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, Training
         morgan_in_dim=int(model_data["morgan_in_dim"]),
         descriptor_in_dim=int(model_data["descriptor_in_dim"]),
         cell_in_dim=int(model_data["cell_in_dim"]),
-        use_pathway_projection=bool(model_data["use_pathway_projection"]),
+        use_pathway_projection=_to_bool(model_data["use_pathway_projection"]),
         n_pathways=int(model_data["n_pathways"]),
         molformer_model_name=str(model_data["molformer_model_name"]),
-        use_pretrained_molformer=bool(model_data["use_pretrained_molformer"]),
-        enable_drug_drug_attention=bool(model_data["enable_drug_drug_attention"]),
-        use_symmetric_fusion=bool(model_data["use_symmetric_fusion"]),
+        use_pretrained_molformer=_to_bool(model_data["use_pretrained_molformer"]),
+        enable_drug_drug_attention=_to_bool(model_data["enable_drug_drug_attention"]),
+        use_symmetric_fusion=_to_bool(model_data["use_symmetric_fusion"]),
         e_min=float(model_data["e_min"]),
         e_max=float(model_data["e_max"]),
         c_min=float(model_data["c_min"]),
@@ -143,3 +184,4 @@ def load_config(config_path: str = "config.yaml") -> tuple[ModelConfig, Training
 
     
     return model_config, training_config
+
