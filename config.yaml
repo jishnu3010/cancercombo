@@ -16,7 +16,7 @@ model:
   enable_drug_drug_attention: true
   use_symmetric_fusion: false
   e_min: 0.0
-  e_max: 100.0
+  e_max: 1.0
   c_min: 1.0e-6
   c_max: 1.0e3
   h_min: 0.1
