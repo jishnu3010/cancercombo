@@ -163,9 +163,23 @@ def run_verification():
 
     # 3. Direct Hill Equation Verification with uM doses
     solver = BivariateHillSolver(e0=100.0)
-    hill_out = solver(batch_doses_a, batch_doses_b, e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
+    model.eval()
+    with torch.no_grad():
+        y_eval, params_eval = model(
+            drug_a_morgan=batch_morgan_a, drug_a_desc=batch_desc_a,
+            drug_b_morgan=batch_morgan_b, drug_b_desc=batch_desc_b,
+            cell_line=batch_cell, doses_a=batch_doses_a, doses_b=batch_doses_b
+        )
+        hill_out = solver(batch_doses_a, batch_doses_b, *params_eval)
+        
+        m_a = model.morgan_enc(batch_morgan_a) + model.descriptor_enc(batch_desc_a)
+        m_b = model.morgan_enc(batch_morgan_b) + model.descriptor_enc(batch_desc_b)
+        c_emb = model.cell_enc(batch_cell)
+        pair_rep = torch.cat([model.drug_cell_attn(m_a, c_emb), model.drug_cell_attn(m_b, c_emb)], dim=1)
+        bias_out = model.heads.predict_bias(pair_rep, batch_doses_a, batch_doses_b)
+
     print(f"[OK] Hill Equation direct call shape: {hill_out.shape}")
-    print(f"[OK] Hill Equation outputs match model y_pred: {torch.allclose(hill_out, y_pred)}")
+    print(f"[OK] Hill + Bias outputs match model y_pred: {torch.allclose(hill_out + bias_out, y_eval)}")
 
     print("\n" + "=" * 70)
     print("VERIFICATION COMPLETE - ALL CHECKS PASSED")
