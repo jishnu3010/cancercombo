@@ -1,6 +1,7 @@
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from config import ModelConfig
 from typing import Tuple
 
@@ -159,19 +160,18 @@ class CancerComboPredictionHeads(nn.Module):
         raw_h2 = self.head_h2(unified_rep)
         raw_alpha = self.head_alpha(unified_rep)
 
-        # Sigmoid scaling maps to physiological ranges
-        e1 = self.config.e_min + (self.config.e_max - self.config.e_min) * torch.sigmoid(raw_e1)
-        e2 = self.config.e_min + (self.config.e_max - self.config.e_min) * torch.sigmoid(raw_e2)
-        e3 = self.config.e_min + (self.config.e_max - self.config.e_min) * torch.sigmoid(raw_e3)
+        # Official DeepSynBa parameter transformations
+        e1 = torch.sigmoid(raw_e1)
+        e2 = torch.sigmoid(raw_e2)
+        e3 = torch.sigmoid(raw_e3)
 
-        # Log-space scaling for C1 and C2
-        log_c1 = self.log_c_min + (self.log_c_max - self.log_c_min) * torch.sigmoid(raw_log_c1)
-        log_c2 = self.log_c_min + (self.log_c_max - self.log_c_min) * torch.sigmoid(raw_log_c2)
+        log_c1 = raw_log_c1
+        log_c2 = raw_log_c2
 
-        h1 = self.config.h_min + (self.config.h_max - self.config.h_min) * torch.sigmoid(raw_h1)
-        h2 = self.config.h_min + (self.config.h_max - self.config.h_min) * torch.sigmoid(raw_h2)
+        h1 = F.relu(raw_h1)
+        h2 = F.relu(raw_h2)
 
-        alpha = self.config.alpha_min + (self.config.alpha_max - self.config.alpha_min) * torch.sigmoid(raw_alpha)
+        alpha = F.relu(raw_alpha)
 
         return e1, e2, e3, log_c1, log_c2, h1, h2, alpha
 
