@@ -407,8 +407,8 @@ class DrugComboDataset(Dataset):
         smiles_a = item['smiles_a']
         smiles_b = item['smiles_b']
         cell_name = item['cell_line_name']
-        doses_a = np.array(item['doses_a'], dtype=np.float32)
-        doses_b = np.array(item['doses_b'], dtype=np.float32)
+        doses_a = np.array(item['doses_a'], dtype=np.float32) * 1e6
+        doses_b = np.array(item['doses_b'], dtype=np.float32) * 1e6
         viability = np.array(item['viability_matrix'], dtype=np.float32)
         
         # Calculate or retrieve chemical representations
