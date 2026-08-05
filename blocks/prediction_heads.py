@@ -41,6 +41,29 @@ class DeepSynBaPredictionHead(nn.Module):
         return self.prediction_head(input)
 
 
+class DoseResponsePredictor(nn.Module):
+    """DeepSynBa 4-layer MLP Dose-Response Predictor for bias vectors."""
+    def __init__(self, in_channels: int = 512, emb_size: int = 1024, dropout: float = 0.2):
+        super().__init__()
+        layers = [
+            DeepSynBaBlock(in_channels, emb_size, dropout=dropout),
+            DeepSynBaBlock(emb_size, emb_size / 2, dropout=dropout),
+            DeepSynBaBlock(emb_size / 2, emb_size / 4, dropout=dropout),
+            nn.Linear(int(emb_size / 4), 4),
+            nn.ReLU()
+        ]
+        self.prediction_head = nn.Sequential(*layers)
+
+        for name, param in self.prediction_head.named_parameters():
+            if 'weight' in name and len(param.data.shape) > 1:
+                nn.init.kaiming_normal_(param.data)
+            elif 'bias' in name:
+                nn.init.zeros_(param.data)
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return self.prediction_head(input)
+
+
 #######################################################
 # OLD CODE - CANCERCOMBO ATTENTION
 #######################################################
@@ -111,6 +134,10 @@ class CancerComboPredictionHeads(nn.Module):
         self.head_h2 = DeepSynBaPredictionHead(in_channels, emb_size, dropout)
         self.head_alpha = DeepSynBaPredictionHead(in_channels, emb_size, dropout)
 
+        # 2 DeepSynBa-style Bias Predictors
+        self.bias_predictor1 = DoseResponsePredictor(in_channels, emb_size, dropout)
+        self.bias_predictor2 = DoseResponsePredictor(in_channels, emb_size, dropout)
+
     def forward(
         self,
         unified_rep: torch.Tensor
@@ -147,3 +174,39 @@ class CancerComboPredictionHeads(nn.Module):
         alpha = self.config.alpha_min + (self.config.alpha_max - self.config.alpha_min) * torch.sigmoid(raw_alpha)
 
         return e1, e2, e3, log_c1, log_c2, h1, h2, alpha
+
+    def predict_bias(
+        self,
+        unified_rep: torch.Tensor,
+        doses_a: torch.Tensor,
+        doses_b: torch.Tensor
+    ) -> torch.Tensor:
+        """Predicts and broadcasts 2D dose-dependent bias matrix matching official DeepSynBa.
+
+        Args:
+            unified_rep: Unified drug combination feature tensor of shape (B, 512).
+            doses_a: Drug A doses tensor of shape (B, M).
+            doses_b: Drug B doses tensor of shape (B, N).
+
+        Returns:
+            torch.Tensor: 2D bias matrix of shape (B, M, N).
+        """
+        out1 = self.bias_predictor1(unified_rep)  # (B, 4)
+        out2 = self.bias_predictor2(unified_rep)  # (B, 4)
+
+        b_size = unified_rep.shape[0]
+        M = doses_a.shape[1]
+        N = doses_b.shape[1]
+
+        if M == 4 and N == 4:
+            out1_grid = out1.reshape(b_size, 4, 1).repeat(1, 1, 4)
+            out2_grid = out2.reshape(b_size, 1, 4).repeat(1, 4, 1)
+        else:
+            out1_grid = out1[:, :M].unsqueeze(2).repeat(1, 1, N) if out1.shape[1] >= M else torch.nn.functional.interpolate(out1.unsqueeze(1), size=M, mode='linear', align_corners=False).squeeze(1).unsqueeze(2).repeat(1, 1, N)
+            out2_grid = out2[:, :N].unsqueeze(1).repeat(1, M, 1) if out2.shape[1] >= N else torch.nn.functional.interpolate(out2.unsqueeze(1), size=N, mode='linear', align_corners=False).squeeze(1).unsqueeze(1).repeat(1, M, 1)
+
+        d1_grid = doses_a.reshape(b_size, M, 1).repeat(1, 1, N)
+        d2_grid = doses_b.reshape(b_size, 1, N).repeat(1, M, 1)
+
+        bias = torch.mul(out1_grid, d1_grid) + torch.mul(out2_grid, d2_grid)
+        return bias

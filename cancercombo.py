@@ -80,6 +80,10 @@ class CancerCombo(nn.Module):
         e1, e2, e3, log_c1, log_c2, h1, h2, alpha = self.heads(pair_rep)
 
         # 7. Solve 2D Dose-Response Matrix with Bivariate Hill Equation Solver
-        y_pred = self.hill_solver(doses_a, doses_b, e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
+        y_hill = self.hill_solver(doses_a, doses_b, e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
+
+        # 8. Predict and Add Dose-Dependent Linear Bias Matrix
+        bias = self.heads.predict_bias(pair_rep, doses_a, doses_b)
+        y_pred = y_hill + bias
 
         return y_pred, (e1, e2, e3, log_c1, log_c2, h1, h2, alpha)
