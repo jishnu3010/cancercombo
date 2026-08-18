@@ -1,13 +1,13 @@
 """
 Masked Bidirectional Cross-Attention Module for CancerCombo-BRICS-Symmetric.
 
-Implements manual Multi-Head Cross-Attention from scratch without PyTorch's nn.MultiheadAttention
-to avoid A100 GPU deadlock issues. Respects key-side and query-side BRICS fragment padding masks,
-and performs masked mean and max pooling for both A -> B and B -> A directions.
+Computes multi-head cross-attention between Drug A fragments and Drug B fragments
+conditioned on cell line representation c. Key-side masks are applied before softmax;
+query-side masks are applied to outputs before masked pooling.
 """
 
 import math
-from typing import Tuple, Union
+from typing import Tuple, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,17 +15,12 @@ import torch.nn.functional as F
 
 class ManualMultiHeadCrossAttention(nn.Module):
     """
-    Manual implementation of Multi-Head Cross-Attention without nn.MultiheadAttention.
-
-    Computes:
-        Q = X_query @ W_Q
-        K = X_kv @ W_K
-        V = X_kv @ W_V
-        Attention(Q, K, V) = Softmax((Q @ K^T) / sqrt(d_k) + key_mask) @ V
-        Output = Attention @ W_O
+    Manual Multi-Head Cross-Attention Module.
+    Constructed without PyTorch's nn.MultiheadAttention to ensure explicit, transparent,
+    and verifiable key-side mask application before softmax.
 
     Args:
-        d_dim: Hidden dimension d (default: 128).
+        d_dim: Embedding dimension d (default: 128).
         num_heads: Number of attention heads (default: 4).
     """
 
@@ -37,26 +32,25 @@ class ManualMultiHeadCrossAttention(nn.Module):
         self.head_dim = d_dim // num_heads
         self.scale = 1.0 / math.sqrt(self.head_dim)
 
-        # Learned linear projections for Q, K, V, and Out
+        # Projections for Query, Key, Value, and Output
         self.W_Q = nn.Linear(d_dim, d_dim, bias=False)
         self.W_K = nn.Linear(d_dim, d_dim, bias=False)
         self.W_V = nn.Linear(d_dim, d_dim, bias=False)
-        self.W_O = nn.Linear(d_dim, d_dim)
+        self.W_O = nn.Linear(d_dim, d_dim, bias=False)
 
     def forward(
         self,
         x_q: torch.Tensor,
         x_kv: torch.Tensor,
-        key_padding_mask: torch.Tensor
+        key_padding_mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
-        Forward pass for single-direction cross attention.
+        Forward pass for manual multi-head cross-attention.
 
         Args:
             x_q: Query sequence tensor of shape (B, L_Q, d_dim).
             x_kv: Key/Value sequence tensor of shape (B, L_KV, d_dim).
-            key_padding_mask: BoolTensor of shape (B, L_KV), where True = VALID keys,
-                              False = PADDED keys.
+            key_padding_mask: BoolTensor of shape (B, L_KV), True = valid, False = padding.
 
         Returns:
             out: Cross-attended output sequence tensor of shape (B, L_Q, d_dim).
@@ -79,7 +73,9 @@ class ManualMultiHeadCrossAttention(nn.Module):
         if key_padding_mask is not None:
             # Reshape key_padding_mask for broadcasting: (B, 1, 1, L_KV)
             mask = key_padding_mask.unsqueeze(1).unsqueeze(2)
-            scores = scores.masked_fill(~mask, -1e9)
+            # FP16 AMP compatible mask fill value (-1e4 for FP16, -1e9 for FP32)
+            fill_val = -1e4 if scores.dtype == torch.float16 else -1e9
+            scores = scores.masked_fill(~mask, fill_val)
 
         # Softmax over key sequence dimension L_KV
         attn_weights = F.softmax(scores, dim=-1)  # Shape: (B, num_heads, L_Q, L_KV)
@@ -167,8 +163,8 @@ class MaskedBidirectionalCrossAttention(nn.Module):
         out_B_from_A = self.attn_b_to_a(x_q=F_tilde_B, x_kv=F_tilde_A, key_padding_mask=mask_A)  # (B, m, d)
 
         # 3. Apply QUERY-side mask to outputs (zero out attention output rows for padded query fragments)
-        mask_A_exp = mask_A.unsqueeze(-1).float()  # (B, n, 1)
-        mask_B_exp = mask_B.unsqueeze(-1).float()  # (B, m, 1)
+        mask_A_exp = mask_A.unsqueeze(-1).to(F_tilde_A.dtype)  # (B, n, 1)
+        mask_B_exp = mask_B.unsqueeze(-1).to(F_tilde_B.dtype)  # (B, m, 1)
 
         H_A_from_B = out_A_from_B * mask_A_exp  # (B, n, d)
         H_B_from_A = out_B_from_A * mask_B_exp  # (B, m, d)
@@ -177,7 +173,8 @@ class MaskedBidirectionalCrossAttention(nn.Module):
         valid_counts_A = mask_A_exp.sum(dim=1).clamp(min=1.0)  # (B, 1)
         mu_A_from_B = H_A_from_B.sum(dim=1) / valid_counts_A   # (B, d)
 
-        H_A_masked = H_A_from_B.masked_fill(~mask_A.unsqueeze(-1), -1e9)
+        fill_val_A = -1e4 if H_A_from_B.dtype == torch.float16 else -1e9
+        H_A_masked = H_A_from_B.masked_fill(~mask_A.unsqueeze(-1), fill_val_A)
         p_A_from_B = H_A_masked.max(dim=1)[0]                  # (B, d)
         p_A_from_B = torch.where(mask_A.any(dim=1, keepdim=True), p_A_from_B, torch.zeros_like(p_A_from_B))
 
@@ -185,7 +182,8 @@ class MaskedBidirectionalCrossAttention(nn.Module):
         valid_counts_B = mask_B_exp.sum(dim=1).clamp(min=1.0)  # (B, 1)
         mu_B_from_A = H_B_from_A.sum(dim=1) / valid_counts_B   # (B, d)
 
-        H_B_masked = H_B_from_A.masked_fill(~mask_B.unsqueeze(-1), -1e9)
+        fill_val_B = -1e4 if H_B_from_A.dtype == torch.float16 else -1e9
+        H_B_masked = H_B_from_A.masked_fill(~mask_B.unsqueeze(-1), fill_val_B)
         p_B_from_A = H_B_masked.max(dim=1)[0]                  # (B, d)
         p_B_from_A = torch.where(mask_B.any(dim=1, keepdim=True), p_B_from_A, torch.zeros_like(p_B_from_A))
 
