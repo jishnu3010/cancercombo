@@ -1,0 +1,35 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Large Datasets & Heavy Files
+data/*.csv
+!data/README.md
+
+# Checkpoints & Trained Models
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.onnx
+
+# Logs & Temporary Files
+logs/
+*.log
+scratch/
+.system_generated/
+
+# OS / IDE generated files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

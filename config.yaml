@@ -1,0 +1,29 @@
+# CancerCombo-BRICS-Symmetric Configuration File
+
+dataset:
+  data_csv: "data/scenario3_drug1.csv"
+  train_split: 3
+  val_split: 2
+  test_split: 1
+  max_samples: null
+
+model:
+  gene_dim: 976
+  cell_dim: 512
+  frag_fp_dim: 2048
+  d_dim: 128
+  num_attn_heads: 4
+  dropout_rate: 0.2
+  shared_attn_weights: true
+
+training:
+  batch_size: 64
+  epochs: 50
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  num_workers: 8
+  use_amp: true
+
+checkpoints:
+  dir: "checkpoints"
+  best_model_name: "best_cancer_combo_brics.pt"

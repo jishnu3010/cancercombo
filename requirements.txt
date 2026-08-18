@@ -1,0 +1,13 @@
+# Core Deep Learning Framework
+torch>=2.0.0
+
+# Cheminformatics & Molecular Processing
+rdkit>=2023.03.1
+
+# Data Processing & Numerical Computation
+numpy>=1.22.0
+pandas>=1.5.0
+
+# Evaluation Metrics & Utilities
+scikit-learn>=1.1.0
+tqdm>=4.64.0
