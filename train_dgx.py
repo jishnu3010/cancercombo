@@ -11,6 +11,10 @@ Features:
 
 import os
 import sys
+
+# Disable Triton JIT compilation to use precompiled cuBLAS CUDA kernels on containers without gcc
+os.environ["TRITON_DISABLE"] = "1"
+
 import time
 import argparse
 import torch
