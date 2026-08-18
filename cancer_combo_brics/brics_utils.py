@@ -6,7 +6,7 @@ converts fragments to Morgan Fingerprints (ECFP4), and handles batch collation
 with padding and boolean attention masks.
 """
 
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Optional
 import torch
 import numpy as np
 
@@ -38,10 +38,13 @@ def decompose_smiles_to_brics(smiles: str) -> List[str]:
     if not RDKIT_AVAILABLE:
         raise ImportError("RDKit is required for BRICS decomposition. Please install rdkit.")
 
+    if not smiles or not isinstance(smiles, str) or smiles.lower() in ("nan", "none", "null"):
+        return ["C"]
+
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         # Fallback for invalid SMILES
-        return [smiles if smiles else "C"]
+        return [smiles]
 
     try:
         # BRICSDecompose breaks strategically valid bonds
@@ -70,7 +73,7 @@ def fragment_to_morgan_fp(frag_smiles: str, n_bits: int = 2048, radius: int = 2)
     if not RDKIT_AVAILABLE:
         raise ImportError("RDKit is required for fingerprint calculation.")
 
-    mol = Chem.MolFromSmiles(frag_smiles)
+    mol = Chem.MolFromSmiles(frag_smiles) if frag_smiles else None
     fp_array = np.zeros((n_bits,), dtype=np.float32)
     if mol is not None:
         try:
@@ -128,3 +131,72 @@ def collate_brics_fragments(
             mask_tensor[i, j] = True
 
     return fp_tensor.to(device), mask_tensor.to(device), all_fragments
+
+
+def print_drug_fragments(smiles: str, fragments: List[str], drug_label: str):
+    """
+    Debug printing helper for single drug SMILES and BRICS fragment list.
+
+    Args:
+        smiles: Original SMILES string.
+        fragments: Pre-existing list of BRICS fragment SMILES strings.
+        drug_label: Label string (e.g. 'Drug A' or 'Drug B').
+    """
+    if not RDKIT_AVAILABLE or not smiles or Chem.MolFromSmiles(smiles) is None:
+        print(f"{drug_label}: Invalid SMILES")
+        return
+    print(f"  {drug_label}:")
+    print(f"    SMILES: {smiles}")
+    print("    BRICS Fragments:")
+    prefix = "A" if "A" in drug_label else ("B" if "B" in drug_label else "")
+    for i, frag in enumerate(fragments, 1):
+        print(f"      {prefix}{i}: {frag}")
+
+
+def print_batch_drug_fragments(
+    smiles_A_list: List[str],
+    frags_A_list: List[List[str]],
+    smiles_B_list: List[str],
+    frags_B_list: List[List[str]]
+):
+    """
+    Debug printing helper for Drug A and Drug B original SMILES and BRICS fragments across a batch.
+
+    Args:
+        smiles_A_list: List of original SMILES for Drug A in batch.
+        frags_A_list: List of pre-existing BRICS fragment SMILES lists for Drug A in batch.
+        smiles_B_list: List of original SMILES for Drug B in batch.
+        frags_B_list: List of pre-existing BRICS fragment SMILES lists for Drug B in batch.
+    """
+    batch_size = max(len(smiles_A_list), len(smiles_B_list))
+    for i in range(batch_size):
+        smiles_a = smiles_A_list[i] if i < len(smiles_A_list) else ""
+        frags_a = frags_A_list[i] if i < len(frags_A_list) else []
+        smiles_b = smiles_B_list[i] if i < len(smiles_B_list) else ""
+        frags_b = frags_B_list[i] if i < len(frags_B_list) else []
+
+        print("=" * 60)
+        print(f"Sample {i + 1}")
+        print("=" * 60)
+
+        # Drug A
+        mol_a = Chem.MolFromSmiles(smiles_a) if (RDKIT_AVAILABLE and smiles_a and smiles_a.lower() not in ("nan", "none", "null")) else None
+        if mol_a is None:
+            print("Drug A: Invalid SMILES")
+        else:
+            print("Drug A:")
+            print(f"  SMILES: {smiles_a}")
+            print("  BRICS Fragments:")
+            for idx, frag in enumerate(frags_a, 1):
+                print(f"    A{idx}: {frag}")
+
+        # Drug B
+        mol_b = Chem.MolFromSmiles(smiles_b) if (RDKIT_AVAILABLE and smiles_b and smiles_b.lower() not in ("nan", "none", "null")) else None
+        if mol_b is None:
+            print("Drug B: Invalid SMILES")
+        else:
+            print("Drug B:")
+            print(f"  SMILES: {smiles_b}")
+            print("  BRICS Fragments:")
+            for idx, frag in enumerate(frags_b, 1):
+                print(f"    B{idx}: {frag}")

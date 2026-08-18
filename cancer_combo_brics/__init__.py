@@ -19,7 +19,9 @@ from .dataset import CancerComboDataset, collate_cancer_combo_batch, load_cancer
 from .brics_utils import (
     decompose_smiles_to_brics,
     fragment_to_morgan_fp,
-    collate_brics_fragments
+    collate_brics_fragments,
+    print_drug_fragments,
+    print_batch_drug_fragments
 )
 
 __all__ = [
@@ -41,5 +43,7 @@ __all__ = [
     "load_cancer_combo_from_csv",
     "decompose_smiles_to_brics",
     "fragment_to_morgan_fp",
-    "collate_brics_fragments"
+    "collate_brics_fragments",
+    "print_drug_fragments",
+    "print_batch_drug_fragments"
 ]

@@ -26,7 +26,7 @@ from .cell_fusion import CellFusion
 from .parameter_heads import ParameterHeads
 from .constraint_transform import ConstraintTransform
 from .bivariate_hill_solver import BivariateHillSolver
-from .brics_utils import collate_brics_fragments
+from .brics_utils import collate_brics_fragments, print_batch_drug_fragments, print_drug_fragments
 
 
 class CancerComboBRICSSymmetric(nn.Module):
@@ -44,6 +44,7 @@ class CancerComboBRICSSymmetric(nn.Module):
         num_attn_heads: Number of attention heads for cross-attention (default: 4).
         dropout_rate: Dropout probability in encoders (default: 0.2).
         shared_attn_weights: Whether to share cross-attention weights across directions (default: True).
+        print_fragments: Flag to toggle debug printing of original SMILES & BRICS fragments (default: False).
     """
 
     def __init__(
@@ -54,7 +55,8 @@ class CancerComboBRICSSymmetric(nn.Module):
         d_dim: int = 128,
         num_attn_heads: int = 4,
         dropout_rate: float = 0.2,
-        shared_attn_weights: bool = True
+        shared_attn_weights: bool = True,
+        print_fragments: bool = False
     ):
         super().__init__()
         self.gene_dim = gene_dim
@@ -62,6 +64,7 @@ class CancerComboBRICSSymmetric(nn.Module):
         self.frag_fp_dim = frag_fp_dim
         self.d_dim = d_dim
         self.num_attn_heads = num_attn_heads
+        self.print_fragments = print_fragments
 
         # 1. Cell-Line Encoder
         self.cell_encoder = CellLineEncoder(
@@ -170,6 +173,7 @@ class CancerComboBRICSSymmetric(nn.Module):
         dose_grid: Optional[Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
         return_params: bool = False,
         debug_print_fragments: bool = False,
+        print_fragments: Optional[bool] = None,
         step: Optional[int] = None,
         print_every: int = 100
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, torch.Tensor]]]:
@@ -185,6 +189,8 @@ class CancerComboBRICSSymmetric(nn.Module):
         device = cell_expr.device
         B = cell_expr.size(0)
 
+        should_print_frags = print_fragments if print_fragments is not None else self.print_fragments
+
         # Parse inputs to resolve positional or keyword usage cleanly
         fp_A, mask_A, fp_B, mask_B, grid = self._parse_inputs(
             cell_expr=cell_expr,
@@ -193,7 +199,8 @@ class CancerComboBRICSSymmetric(nn.Module):
             drugB_frags=drugB_frags,
             drugB_mask=drugB_mask,
             dose_grid=dose_grid,
-            device=device
+            device=device,
+            print_fragments=should_print_frags
         )
 
         # STAGE 1: Cell-Line Encoder
@@ -280,17 +287,22 @@ class CancerComboBRICSSymmetric(nn.Module):
         drugB_frags: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], List[str]]] = None,
         drugB_mask: Optional[torch.Tensor] = None,
         dose_grid: Optional[Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
-        device: Union[torch.device, str] = "cpu"
+        device: Union[torch.device, str] = "cpu",
+        print_fragments: bool = False
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """Helper to parse flexible positional and keyword input signatures."""
-        if isinstance(drugA_frags, (list, tuple)) and isinstance(drugA_frags[0], str):
+        if isinstance(drugA_frags, (list, tuple)) and len(drugA_frags) > 0 and isinstance(drugA_frags[0], str):
             # High-level signature: forward(cell_expr, smiles_A, smiles_B, dose_grid)
             smiles_A = drugA_frags
             smiles_B = drugA_mask if isinstance(drugA_mask, (list, tuple)) else drugB_frags
             grid = drugB_frags if isinstance(drugB_frags, tuple) else dose_grid
 
-            fp_A, mask_A, _ = collate_brics_fragments(smiles_A, n_bits=self.frag_fp_dim, device=device)
-            fp_B, mask_B, _ = collate_brics_fragments(smiles_B, n_bits=self.frag_fp_dim, device=device)
+            fp_A, mask_A, frags_A_list = collate_brics_fragments(smiles_A, n_bits=self.frag_fp_dim, device=device)
+            fp_B, mask_B, frags_B_list = collate_brics_fragments(smiles_B, n_bits=self.frag_fp_dim, device=device)
+
+            if print_fragments:
+                print_batch_drug_fragments(smiles_A, frags_A_list, smiles_B, frags_B_list)
+
             return fp_A, mask_A, fp_B, mask_B, grid
 
         return drugA_frags, drugA_mask, drugB_frags, drugB_mask, dose_grid

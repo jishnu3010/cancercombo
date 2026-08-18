@@ -65,11 +65,12 @@ def collate_cancer_combo_batch(
     batch: List[Dict[str, Union[torch.Tensor, str]]],
     frag_fp_dim: int = 2048,
     device: Union[torch.device, str] = "cpu"
-) -> Dict[str, torch.Tensor]:
+) -> Dict[str, Union[torch.Tensor, List]]:
     """
     Custom collate function for CancerComboDataset.
 
     Collates a list of dataset samples into padded tensors with BRICS fragment padding masks.
+    Also preserves SMILES strings and pre-existing BRICS fragment lists for inspection.
     """
     cell_expr_list = [item["cell_expr"] for item in batch]
     smiles_A_list = [item["smiles_A"] for item in batch]
@@ -81,9 +82,9 @@ def collate_cancer_combo_batch(
     # Stack cell line expressions: (B, 976)
     cell_expr = torch.stack(cell_expr_list, dim=0).to(device)
 
-    # Collate BRICS fragments for Drug A and Drug B into padded tensors and boolean masks
-    fp_A, mask_A, _ = collate_brics_fragments(smiles_A_list, n_bits=frag_fp_dim, device=device)
-    fp_B, mask_B, _ = collate_brics_fragments(smiles_B_list, n_bits=frag_fp_dim, device=device)
+    # Collate BRICS fragments for Drug A and Drug B into padded tensors, boolean masks, and fragment lists
+    fp_A, mask_A, frags_A_list = collate_brics_fragments(smiles_A_list, n_bits=frag_fp_dim, device=device)
+    fp_B, mask_B, frags_B_list = collate_brics_fragments(smiles_B_list, n_bits=frag_fp_dim, device=device)
 
     # Stack dose concentrations and ground truth viability surface matrices
     doses_A = torch.stack(doses_A_list, dim=0).to(device)
@@ -97,7 +98,11 @@ def collate_cancer_combo_batch(
         "fp_B": fp_B,
         "mask_B": mask_B,
         "dose_grid": (doses_A, doses_B),
-        "Y_true": Y_true
+        "Y_true": Y_true,
+        "smiles_A": smiles_A_list,
+        "smiles_B": smiles_B_list,
+        "frags_A": frags_A_list,
+        "frags_B": frags_B_list
     }
 
 
