@@ -25,13 +25,30 @@ from cancer_combo_brics import (
 )
 
 
+def move_batch_to_device(batch: dict, device: torch.device) -> dict:
+    """Helper to move all DataLoader batch tensors to target device (CUDA GPU or CPU)."""
+    return {
+        "cell_expr": batch["cell_expr"].to(device),
+        "fp_A": batch["fp_A"].to(device),
+        "mask_A": batch["mask_A"].to(device),
+        "fp_B": batch["fp_B"].to(device),
+        "mask_B": batch["mask_B"].to(device),
+        "dose_grid": (
+            batch["dose_grid"][0].to(device),
+            batch["dose_grid"][1].to(device)
+        ),
+        "Y_true": batch["Y_true"].to(device)
+    }
+
+
 def train_epoch(model, loader, optimizer, criterion, scaler, device):
     model.train()
     total_loss = 0.0
     num_batches = 0
 
-    for batch in loader:
+    for raw_batch in loader:
         optimizer.zero_grad()
+        batch = move_batch_to_device(raw_batch, device)
 
         # Automatic Mixed Precision for NVIDIA Tensor Cores (A100 / H100)
         with torch.amp.autocast('cuda', enabled=device.type == "cuda" and config.USE_AMP):
@@ -65,7 +82,8 @@ def evaluate(model, loader, criterion, device):
     total_loss = 0.0
     num_batches = 0
 
-    for batch in loader:
+    for raw_batch in loader:
+        batch = move_batch_to_device(raw_batch, device)
         with torch.amp.autocast('cuda', enabled=device.type == "cuda" and config.USE_AMP):
             Y_pred = model(
                 cell_expr=batch["cell_expr"],

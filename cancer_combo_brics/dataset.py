@@ -171,7 +171,8 @@ def load_cancer_combo_from_csv(
             smiles_A = str(row.get("smiles_a") or row.get("smiles_A") or "").strip()
             smiles_B = str(row.get("smiles_b") or row.get("smiles_B") or "").strip()
 
-            if not smiles_A or not smiles_B:
+            # Skip missing, empty, or invalid 'nan' SMILES strings
+            if not smiles_A or not smiles_B or smiles_A.lower() in ("nan", "none", "null") or smiles_B.lower() in ("nan", "none", "null"):
                 continue
 
             # Ensure cell line landmark gene expression exists in dict
