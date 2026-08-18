@@ -140,7 +140,7 @@ def load_cancer_combo_from_csv(
             for row in reader:
                 if not row:
                     continue
-                cell_id = row[0].strip()
+                cell_id = str(row[0]).strip()
                 expr_vals = [float(x) for x in row[1:1 + gene_dim]]
                 if len(expr_vals) < gene_dim:
                     expr_vals.extend([0.0] * (gene_dim - len(expr_vals)))
@@ -157,17 +157,19 @@ def load_cancer_combo_from_csv(
             if max_samples and len(drug_pairs) >= max_samples:
                 break
 
-            # Filter by split if specified
-            if split is not None and "split" in row and row["split"].strip():
-                try:
-                    if int(float(row["split"])) != split:
-                        continue
-                except ValueError:
-                    pass
+            # Filter by split if specified (safely handles None or missing values)
+            if split is not None and row.get("split") is not None:
+                raw_split = str(row["split"]).strip()
+                if raw_split:
+                    try:
+                        if int(float(raw_split)) != split:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
 
-            cell_id = (row.get("cell_line_name") or row.get("cell_line_id") or row.get("cell") or "cell").strip()
-            smiles_A = (row.get("smiles_a") or row.get("smiles_A") or "").strip()
-            smiles_B = (row.get("smiles_b") or row.get("smiles_B") or "").strip()
+            cell_id = str(row.get("cell_line_name") or row.get("cell_line_id") or row.get("cell") or "cell").strip()
+            smiles_A = str(row.get("smiles_a") or row.get("smiles_A") or "").strip()
+            smiles_B = str(row.get("smiles_b") or row.get("smiles_B") or "").strip()
 
             if not smiles_A or not smiles_B:
                 continue
@@ -182,8 +184,8 @@ def load_cancer_combo_from_csv(
                 )
 
             # Parse doses_a and doses_b
-            doses_a_str = (row.get("doses_a") or row.get("doses_A") or "").strip()
-            doses_b_str = (row.get("doses_b") or row.get("doses_B") or "").strip()
+            doses_a_str = str(row.get("doses_a") or row.get("doses_A") or "").strip()
+            doses_b_str = str(row.get("doses_b") or row.get("doses_B") or "").strip()
 
             if doses_a_str.startswith("["):
                 doses_a_list = json.loads(doses_a_str)
@@ -199,7 +201,7 @@ def load_cancer_combo_from_csv(
             doses_B = torch.tensor(doses_b_list, dtype=torch.float32)
 
             # Parse viability matrix from JSON 2D array or delimited string
-            viab_str = (row.get("viability_matrix") or row.get("Y_true") or row.get("viability") or "").strip()
+            viab_str = str(row.get("viability_matrix") or row.get("Y_true") or row.get("viability") or "").strip()
             if viab_str.startswith("["):
                 matrix_raw = json.loads(viab_str)
                 matrix_arr = np.array(matrix_raw, dtype=np.float32)
