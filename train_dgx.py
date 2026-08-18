@@ -7,6 +7,7 @@ Features:
     - GPU acceleration (CUDA) with Automatic Mixed Precision (AMP / FP16).
     - Data loading from data/scenario3_drug1.csv with train/val/test splits.
     - Full training loop with MSE loss, evaluation, and checkpoint saving.
+    - Debug printing hook for F_A and F_B fragment embeddings (--debug_print_fragments).
 """
 
 import os
@@ -45,12 +46,12 @@ def move_batch_to_device(batch: dict, device: torch.device) -> dict:
     }
 
 
-def train_epoch(model, loader, optimizer, criterion, scaler, device):
+def train_epoch(model, loader, optimizer, criterion, scaler, device, debug_print_fragments=False, print_every=100, global_step_offset=0):
     model.train()
     total_loss = 0.0
     num_batches = 0
 
-    for raw_batch in loader:
+    for step, raw_batch in enumerate(loader, start=1 + global_step_offset):
         optimizer.zero_grad()
         batch = move_batch_to_device(raw_batch, device)
 
@@ -62,7 +63,10 @@ def train_epoch(model, loader, optimizer, criterion, scaler, device):
                 drugA_mask=batch["mask_A"],
                 drugB_frags=batch["fp_B"],
                 drugB_mask=batch["mask_B"],
-                dose_grid=batch["dose_grid"]
+                dose_grid=batch["dose_grid"],
+                debug_print_fragments=debug_print_fragments,
+                step=step,
+                print_every=print_every
             )
             loss = criterion(Y_pred, batch["Y_true"])
 
@@ -77,7 +81,7 @@ def train_epoch(model, loader, optimizer, criterion, scaler, device):
         total_loss += loss.item()
         num_batches += 1
 
-    return total_loss / max(num_batches, 1)
+    return total_loss / max(num_batches, 1), num_batches
 
 
 @torch.no_grad()
@@ -116,6 +120,8 @@ def main():
     parser.add_argument("--num_workers", type=int, default=config.NUM_WORKERS, help="DataLoader num_workers")
     parser.add_argument("--checkpoint_dir", type=str, default=config.CHECKPOINT_DIR, help="Directory to save model checkpoints")
     parser.add_argument("--max_samples", type=int, default=config.MAX_SAMPLES, help="Max samples limit (optional)")
+    parser.add_argument("--debug_print_fragments", action="store_true", help="Toggle debug printing of raw F_A and F_B fragment embeddings during training")
+    parser.add_argument("--print_every", type=int, default=100, help="Print debug fragment stats every N steps (default: 100)")
 
     args = parser.parse_args()
 
@@ -164,10 +170,22 @@ def main():
     # 3. Training Loop
     print(f"\n[3] Starting Training for {args.epochs} Epochs on {device}...")
     best_loss = float("inf")
+    global_step = 0
 
     for epoch in range(1, args.epochs + 1):
         epoch_start = time.time()
-        train_loss = train_epoch(model, train_loader, optimizer, criterion, scaler, device)
+        train_loss, n_batches = train_epoch(
+            model=model,
+            loader=train_loader,
+            optimizer=optimizer,
+            criterion=criterion,
+            scaler=scaler,
+            device=device,
+            debug_print_fragments=args.debug_print_fragments,
+            print_every=args.print_every,
+            global_step_offset=global_step
+        )
+        global_step += n_batches
         scheduler.step()
 
         elapsed = time.time() - epoch_start
