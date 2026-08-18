@@ -18,7 +18,8 @@ class ManualMultiHeadCrossAttention(nn.Module):
     Manual Multi-Head Cross-Attention Module.
     Constructed without PyTorch's nn.MultiheadAttention to ensure explicit, transparent,
     and verifiable key-side mask application before softmax.
-    Uses cuBLAS torch.bmm for 100% CUDA execution without requiring Triton JIT C compilers.
+    Uses pure elementwise tensor contraction to guarantee 100% execution on native PyTorch
+    CUDA C++ kernels without invoking Triton JIT C compilers.
 
     Args:
         d_dim: Embedding dimension d (default: 128).
@@ -59,36 +60,30 @@ class ManualMultiHeadCrossAttention(nn.Module):
         B, L_Q, _ = x_q.shape
         _, L_KV, _ = x_kv.shape
 
-        # Linear projections
-        # Shape: (B, L_Q, d_dim) -> (B, num_heads, L_Q, head_dim)
+        # Linear projections -> Shape: (B, num_heads, L, head_dim)
         Q = self.W_Q(x_q).view(B, L_Q, self.num_heads, self.head_dim).transpose(1, 2)
         K = self.W_K(x_kv).view(B, L_KV, self.num_heads, self.head_dim).transpose(1, 2)
         V = self.W_V(x_kv).view(B, L_KV, self.num_heads, self.head_dim).transpose(1, 2)
 
-        # Reshape to 3D for cuBLAS torch.bmm execution: (B * num_heads, L, head_dim)
-        Q_flat = Q.reshape(B * self.num_heads, L_Q, self.head_dim)
-        K_flat = K.reshape(B * self.num_heads, L_KV, self.head_dim)
-        V_flat = V.reshape(B * self.num_heads, L_KV, self.head_dim)
-
-        # Scaled dot-product attention scores using cuBLAS bmm: (B * num_heads, L_Q, L_KV)
-        scores = torch.bmm(Q_flat, K_flat.transpose(1, 2)) * self.scale
+        # Compute dot-product attention scores using pure elementwise contraction:
+        # Q shape: (B, num_heads, L_Q, 1, head_dim), K shape: (B, num_heads, 1, L_KV, head_dim)
+        scores = (Q.unsqueeze(-2) * K.unsqueeze(-3)).sum(dim=-1) * self.scale  # (B, num_heads, L_Q, L_KV)
 
         # Apply key-side padding mask before softmax
         if key_padding_mask is not None:
-            # Reshape key_padding_mask for 3D broadcasting: (B * num_heads, L_Q, L_KV)
-            mask_3d = key_padding_mask.unsqueeze(1).unsqueeze(2).expand(-1, self.num_heads, L_Q, -1)
-            mask_flat = mask_3d.reshape(B * self.num_heads, L_Q, L_KV)
+            mask = key_padding_mask.unsqueeze(1).unsqueeze(2)  # (B, 1, 1, L_KV)
             fill_val = -1e4 if scores.dtype == torch.float16 else -1e9
-            scores = scores.masked_fill(~mask_flat, fill_val)
+            scores = scores.masked_fill(~mask, fill_val)
 
         # Softmax over key sequence dimension L_KV
-        attn_weights = F.softmax(scores, dim=-1)  # Shape: (B * num_heads, L_Q, L_KV)
+        attn_weights = F.softmax(scores, dim=-1)  # Shape: (B, num_heads, L_Q, L_KV)
 
-        # Compute weighted sum over values using cuBLAS bmm: (B * num_heads, L_Q, head_dim)
-        context_flat = torch.bmm(attn_weights, V_flat)
+        # Compute weighted sum over values using pure elementwise contraction:
+        # attn_weights shape: (B, num_heads, L_Q, L_KV, 1), V shape: (B, num_heads, 1, L_KV, head_dim)
+        context = (attn_weights.unsqueeze(-1) * V.unsqueeze(-3)).sum(dim=-2)  # (B, num_heads, L_Q, head_dim)
 
-        # Reshape back to 4D & concatenate heads: (B, L_Q, d_dim)
-        context = context_flat.view(B, self.num_heads, L_Q, self.head_dim).transpose(1, 2).contiguous().view(B, L_Q, self.d_dim)
+        # Concatenate heads: (B, L_Q, d_dim)
+        context = context.transpose(1, 2).contiguous().view(B, L_Q, self.d_dim)
 
         # Output projection
         out = self.W_O(context)  # Shape: (B, L_Q, d_dim)
