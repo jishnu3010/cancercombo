@@ -1,0 +1,28 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+env/
+venv/
+.venv/
+ENV/
+
+# Checkpoints & Trained Models
+checkpoints/
+*.pt
+*.pth
+*.bin
+
+# Logs & Temporary Files
+logs/
+*.log
+scratch/
+.system_generated/
+
+# OS / IDE generated files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
