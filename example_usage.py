@@ -12,6 +12,7 @@ Demonstrates:
 import os
 import torch
 from torch.utils.data import DataLoader
+import config
 from cancer_combo_brics import (
     CancerComboBRICSSymmetric,
     load_cancer_combo_from_csv,
@@ -24,10 +25,10 @@ def main():
     print("  CancerCombo-BRICS-Symmetric Dataset Pipeline Demonstration")
     print("=" * 75)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = config.DEVICE
     print(f"Using device: {device}")
 
-    dataset_path = os.path.join("data", "scenario3_drug1.csv")
+    dataset_path = config.DATA_CSV
     if not os.path.exists(dataset_path):
         raise FileNotFoundError(f"Dataset file not found at {dataset_path}")
 

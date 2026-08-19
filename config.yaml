@@ -2,6 +2,7 @@
 
 dataset:
   data_csv: "data/scenario3_drug_level.csv"
+  original_csv: "data/scenario3_drug1.csv"
   train_split: 3
   val_split: 2
   test_split: 1
@@ -27,3 +28,6 @@ training:
 checkpoints:
   dir: "checkpoints"
   best_model_name: "best_cancer_combo_brics.pt"
+
+logging:
+  log_dir: "logs"
