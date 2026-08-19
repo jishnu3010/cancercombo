@@ -24,9 +24,9 @@ _defaults = {
     "dataset": {
         "data_csv": "data/scenario3_drug_level.csv",
         "original_csv": "data/scenario3_drug1.csv",
-        "train_split": 3,
+        "train_split": 1,
         "val_split": 2,
-        "test_split": 1,
+        "test_split": 3,
         "max_samples": None,
     },
     "model": {

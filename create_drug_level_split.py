@@ -129,7 +129,8 @@ def generate_drug_level_split(
     assert train_drugs.isdisjoint(test_drugs), "Train and Test drugs overlap!"
     assert val_drugs.isdisjoint(test_drugs), "Val and Test drugs overlap!"
 
-    # Categorize rows into splits: 3 = Train, 2 = Val, 1 = Test
+    # Categorize rows into splits according to standard CancerCombo convention:
+    # 1 = Train, 2 = Val, 3 = Test
     train_rows = []
     val_rows = []
     test_rows = []
@@ -140,13 +141,13 @@ def generate_drug_level_split(
 
         row_copy = dict(row)
         if sa in train_drugs and sb in train_drugs:
-            row_copy["split"] = "3"
+            row_copy["split"] = "1"
             train_rows.append(row_copy)
         elif sa in val_drugs and sb in val_drugs:
             row_copy["split"] = "2"
             val_rows.append(row_copy)
         elif sa in test_drugs and sb in test_drugs:
-            row_copy["split"] = "1"
+            row_copy["split"] = "3"
             test_rows.append(row_copy)
 
     output_rows = train_rows + val_rows + test_rows

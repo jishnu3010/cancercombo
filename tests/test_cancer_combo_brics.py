@@ -473,9 +473,9 @@ class TestCancerComboBRICSSymmetric(unittest.TestCase):
             from create_drug_level_split import generate_drug_level_split
             generate_drug_level_split(output_csv=drug_level_csv)
 
-        train_dataset = load_cancer_combo_from_csv(drug_level_csv, split=3)
+        train_dataset = load_cancer_combo_from_csv(drug_level_csv, split=1)
         val_dataset = load_cancer_combo_from_csv(drug_level_csv, split=2)
-        test_dataset = load_cancer_combo_from_csv(drug_level_csv, split=1)
+        test_dataset = load_cancer_combo_from_csv(drug_level_csv, split=3)
 
         def get_drugs(dataset):
             drugs = set()
