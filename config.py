@@ -12,7 +12,9 @@ import torch
 # DATASET CONFIGURATION
 # ==============================================================================
 DATA_DIR = "data"
-DATA_CSV = os.path.join(DATA_DIR, "scenario3_drug1.csv")
+DEFAULT_DRUG_LEVEL_CSV = os.path.join(DATA_DIR, "scenario3_drug_level.csv")
+DEFAULT_ORIGINAL_CSV = os.path.join(DATA_DIR, "scenario3_drug1.csv")
+DATA_CSV = DEFAULT_DRUG_LEVEL_CSV if os.path.exists(DEFAULT_DRUG_LEVEL_CSV) else DEFAULT_ORIGINAL_CSV
 TRAIN_SPLIT = 3
 VAL_SPLIT = 2
 TEST_SPLIT = 1

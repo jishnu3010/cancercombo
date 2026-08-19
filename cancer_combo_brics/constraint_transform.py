@@ -37,7 +37,7 @@ class ConstraintTransform(nn.Module):
         Returns:
             transformed_params: Dictionary of transformed parameter tensors (B, 1).
         """
-        e0 = 0.5 + 0.6 * torch.sigmoid(raw_params["e0"])
+        e0 = torch.sigmoid(raw_params["e0"])
         e1 = torch.sigmoid(raw_params["e1"])
         e2 = torch.sigmoid(raw_params["e2"])
         e12 = torch.sigmoid(raw_params["e12"])

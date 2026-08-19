@@ -72,7 +72,7 @@ class ManualMultiHeadCrossAttention(nn.Module):
         # Apply key-side padding mask before softmax
         if key_padding_mask is not None:
             mask = key_padding_mask.unsqueeze(1).unsqueeze(2)  # (B, 1, 1, L_KV)
-            fill_val = -1e4 if scores.dtype == torch.float16 else -1e9
+            fill_val = torch.finfo(scores.dtype).min
             scores = scores.masked_fill(~mask, fill_val)
 
         # Softmax over key sequence dimension L_KV
@@ -172,7 +172,7 @@ class MaskedBidirectionalCrossAttention(nn.Module):
         valid_counts_A = mask_A_exp.sum(dim=1).clamp(min=1.0)  # (B, 1)
         mu_A_from_B = H_A_from_B.sum(dim=1) / valid_counts_A   # (B, d)
 
-        fill_val_A = -1e4 if H_A_from_B.dtype == torch.float16 else -1e9
+        fill_val_A = torch.finfo(H_A_from_B.dtype).min
         H_A_masked = H_A_from_B.masked_fill(~mask_A.unsqueeze(-1), fill_val_A)
         p_A_from_B = H_A_masked.max(dim=1)[0]                  # (B, d)
         p_A_from_B = torch.where(mask_A.any(dim=1, keepdim=True), p_A_from_B, torch.zeros_like(p_A_from_B))
@@ -181,7 +181,7 @@ class MaskedBidirectionalCrossAttention(nn.Module):
         valid_counts_B = mask_B_exp.sum(dim=1).clamp(min=1.0)  # (B, 1)
         mu_B_from_A = H_B_from_A.sum(dim=1) / valid_counts_B   # (B, d)
 
-        fill_val_B = -1e4 if H_B_from_A.dtype == torch.float16 else -1e9
+        fill_val_B = torch.finfo(H_B_from_A.dtype).min
         H_B_masked = H_B_from_A.masked_fill(~mask_B.unsqueeze(-1), fill_val_B)
         p_B_from_A = H_B_masked.max(dim=1)[0]                  # (B, d)
         p_B_from_A = torch.where(mask_B.any(dim=1, keepdim=True), p_B_from_A, torch.zeros_like(p_B_from_A))

@@ -21,6 +21,9 @@ logs/
 scratch/
 .system_generated/
 
+# Data files
+data/*.csv
+
 # OS / IDE generated files
 .DS_Store
 Thumbs.db

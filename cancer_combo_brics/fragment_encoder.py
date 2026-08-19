@@ -44,23 +44,22 @@ class FragmentEncoder(nn.Module):
         Forward pass for fragment encoder.
 
         Args:
-            frag_features: Tensor of shape (B, N_frag, in_bits).
+            frag_features: Tensor of shape (B, N_frag, in_bits) or (N_frag, in_bits).
 
         Returns:
-            F: Encoded fragment embeddings tensor of shape (B, N_frag, d_dim).
+            F: Encoded fragment embeddings tensor of shape (B, N_frag, d_dim) or (N_frag, d_dim).
         """
-        assert frag_features.dim() == 3, (
-            f"Expected frag_features to be 3D tensor (B, N_frag, {self.in_bits}), got shape {tuple(frag_features.shape)}"
+        assert frag_features.dim() in (2, 3), (
+            f"Expected frag_features to be 2D or 3D tensor, got shape {tuple(frag_features.shape)}"
         )
-        assert frag_features.size(2) == self.in_bits, (
-            f"Expected fingerprint dim {self.in_bits}, got {frag_features.size(2)}"
+        assert frag_features.size(-1) == self.in_bits, (
+            f"Expected fingerprint dim {self.in_bits}, got {frag_features.size(-1)}"
         )
 
-        B, N_frag, _ = frag_features.shape
-        F = self.net(frag_features)  # Shape: (B, N_frag, d_dim)
+        F = self.net(frag_features)
 
-        assert F.shape == (B, N_frag, self.d_dim), (
-            f"Fragment encoder output shape mismatch: expected ({B}, {N_frag}, {self.d_dim}), got {tuple(F.shape)}"
+        assert F.size(-1) == self.d_dim, (
+            f"Fragment encoder output embedding dim mismatch: expected {self.d_dim}, got {F.size(-1)}"
         )
 
         return F

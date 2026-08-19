@@ -85,26 +85,11 @@ class TestDrugFragmentsDebug(unittest.TestCase):
         self.assertLess(sample1_idx, sample2_idx)
 
     def test_validation_3_invalid_smiles(self):
-        """Test 3: Invalid SMILES -> prints 'Invalid SMILES', does not crash."""
+        """Test 3: Invalid SMILES -> raises ValueError explicitly, never creates zero fragment."""
         smiles_A_list = ["invalid_smiles_string_xyz"]
-        smiles_B_list = ["CN1C=NC2=C1C(=O)N(C(=O)N2C)C"]
 
-        _, _, frags_A_list = collate_brics_fragments(smiles_A_list)
-        _, _, frags_B_list = collate_brics_fragments(smiles_B_list)
-
-        captured_output = io.StringIO()
-        sys.stdout = captured_output
-
-        print_batch_drug_fragments(smiles_A_list, frags_A_list, smiles_B_list, frags_B_list)
-
-        sys.stdout = sys.__stdout__
-        output = captured_output.getvalue()
-
-        print("--- Test 3 Output ---")
-        print(output)
-
-        self.assertIn("Drug A: Invalid SMILES", output)
-        self.assertIn("Drug B:", output)
+        with self.assertRaises(ValueError):
+            collate_brics_fragments(smiles_A_list)
 
     def test_validation_4_flag_disabled(self):
         """Test 4: print_fragments = False -> training runs identically with no printed output."""

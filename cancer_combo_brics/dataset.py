@@ -194,12 +194,20 @@ def load_cancer_combo_from_csv(
             doses_b_str = str(row.get("doses_b") or row.get("doses_B") or "").strip()
 
             if doses_a_str.startswith("["):
-                doses_a_list = json.loads(doses_a_str)
+                try:
+                    doses_a_list = json.loads(doses_a_str)
+                except (json.JSONDecodeError, ValueError):
+                    import ast
+                    doses_a_list = ast.literal_eval(doses_a_str)
             else:
                 doses_a_list = [float(x) for x in doses_a_str.replace(",", " ").split() if x.strip()]
 
             if doses_b_str.startswith("["):
-                doses_b_list = json.loads(doses_b_str)
+                try:
+                    doses_b_list = json.loads(doses_b_str)
+                except (json.JSONDecodeError, ValueError):
+                    import ast
+                    doses_b_list = ast.literal_eval(doses_b_str)
             else:
                 doses_b_list = [float(x) for x in doses_b_str.replace(",", " ").split() if x.strip()]
 
@@ -209,7 +217,11 @@ def load_cancer_combo_from_csv(
             # Parse viability matrix from JSON 2D array or delimited string
             viab_str = str(row.get("viability_matrix") or row.get("Y_true") or row.get("viability") or "").strip()
             if viab_str.startswith("["):
-                matrix_raw = json.loads(viab_str)
+                try:
+                    matrix_raw = json.loads(viab_str)
+                except (json.JSONDecodeError, ValueError):
+                    import ast
+                    matrix_raw = ast.literal_eval(viab_str)
                 matrix_arr = np.array(matrix_raw, dtype=np.float32)
                 # Normalize percentage (0 to 100) to fraction (0.0 to 1.0)
                 if matrix_arr.max() > 2.0:

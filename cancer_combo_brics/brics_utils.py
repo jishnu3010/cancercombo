@@ -32,19 +32,19 @@ def decompose_smiles_to_brics(smiles: str) -> List[str]:
         smiles: SMILES string of the drug molecule.
 
     Returns:
-        List of fragment SMILES strings. If decomposition yields no fragments or fails,
-        returns [smiles].
+        List of fragment SMILES strings.
+    Raises:
+        ValueError: If SMILES is invalid or cannot be parsed by RDKit.
     """
     if not RDKIT_AVAILABLE:
         raise ImportError("RDKit is required for BRICS decomposition. Please install rdkit.")
 
     if not smiles or not isinstance(smiles, str) or smiles.lower() in ("nan", "none", "null"):
-        return ["C"]
+        raise ValueError(f"Invalid SMILES string encountered: '{smiles}'")
 
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
-        # Fallback for invalid SMILES
-        return [smiles]
+        raise ValueError(f"RDKit failed to parse invalid SMILES string: '{smiles}'")
 
     try:
         # BRICSDecompose breaks strategically valid bonds
@@ -52,15 +52,14 @@ def decompose_smiles_to_brics(smiles: str) -> List[str]:
         if not fragments:
             fragments = [smiles]
         return fragments
-    except Exception:
-        # Fallback to full SMILES if BRICS fails
+    except Exception as e:
+        # Fallback to full SMILES if BRICS decomposition fails but mol is valid
         return [smiles]
 
 
 def fragment_to_morgan_fp(frag_smiles: str, n_bits: int = 2048, radius: int = 2) -> np.ndarray:
     """
     Computes Morgan Fingerprint (ECFP4) for a fragment SMILES string.
-    Uses modern rdFingerprintGenerator if available to prevent deprecation warnings.
 
     Args:
         frag_smiles: Fragment SMILES string.
@@ -69,22 +68,30 @@ def fragment_to_morgan_fp(frag_smiles: str, n_bits: int = 2048, radius: int = 2)
 
     Returns:
         Numpy array of shape (n_bits,) containing binary fingerprint.
+    Raises:
+        ValueError: If fragment SMILES cannot be parsed by RDKit.
     """
     if not RDKIT_AVAILABLE:
         raise ImportError("RDKit is required for fingerprint calculation.")
 
-    mol = Chem.MolFromSmiles(frag_smiles) if frag_smiles else None
+    if not frag_smiles or frag_smiles.lower() in ("nan", "none", "null"):
+        raise ValueError(f"Invalid fragment SMILES string: '{frag_smiles}'")
+
+    mol = Chem.MolFromSmiles(frag_smiles)
+    if mol is None:
+        raise ValueError(f"RDKit failed to parse fragment SMILES string: '{frag_smiles}'")
+
     fp_array = np.zeros((n_bits,), dtype=np.float32)
-    if mol is not None:
-        try:
-            from rdkit.DataStructs import ConvertToNumpyArray
-            if _MORGAN_GEN is not None and n_bits == 2048 and radius == 2:
-                fp = _MORGAN_GEN.GetFingerprint(mol)
-            else:
-                fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)
-            ConvertToNumpyArray(fp, fp_array)
-        except Exception:
-            pass
+    try:
+        from rdkit.DataStructs import ConvertToNumpyArray
+        if _MORGAN_GEN is not None and n_bits == 2048 and radius == 2:
+            fp = _MORGAN_GEN.GetFingerprint(mol)
+        else:
+            fp = AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)
+        ConvertToNumpyArray(fp, fp_array)
+    except Exception as e:
+        raise ValueError(f"Failed to generate fingerprint for fragment '{frag_smiles}': {e}")
+
     return fp_array
 
 

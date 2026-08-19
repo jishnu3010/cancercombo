@@ -79,6 +79,9 @@ class CancerComboBRICSSymmetric(nn.Module):
             d_dim=d_dim
         )
 
+        # Final Fragment LayerNorm (applied immediately before FiLM conditioning)
+        self.fragment_norm = nn.LayerNorm(d_dim)
+
         # 3. Cell Conditioning (FiLM) - single shared module applied to both drugs
         self.film = FiLMConditioning(cell_dim=cell_dim, d_dim=d_dim)
 
@@ -206,27 +209,27 @@ class CancerComboBRICSSymmetric(nn.Module):
         # STAGE 1: Cell-Line Encoder
         # Output c: (B, 512)
         c = self.cell_encoder(cell_expr)
-        assert c.shape == (B, self.cell_dim), f"Stage 1 cell vector shape mismatch: got {tuple(c.shape)}"
+        n, m = fp_A.size(1), fp_B.size(1)
 
-        # STAGE 2: Shared Fragment Encoder
-        # Input fp_A: (B, n, fp_dim) -> Output F_A: (B, n, d)
-        # Input fp_B: (B, m, fp_dim) -> Output F_B: (B, m, d)
+        # STAGE 2 & 3: Fragment Encoder -> Final LayerNorm -> Standard FiLM Conditioning -> Padding Masking
+        # Mathematical sequence:
+        # F_A = Encoder(FP_A)
+        # F_A_norm = LayerNorm(F_A)
+        # F_tilde_A = (gamma(c) * F_A_norm + beta(c)) * mask_A
         F_A = self.fragment_encoder(fp_A)
+        F_A_norm = self.fragment_norm(F_A)
+        F_tilde_A = self.film(F_A_norm, c) * mask_A.unsqueeze(-1)
+
         F_B = self.fragment_encoder(fp_B)
-        n, m = F_A.size(1), F_B.size(1)
-        assert F_A.shape == (B, n, self.d_dim), f"Stage 2 F_A shape mismatch: got {tuple(F_A.shape)}"
-        assert F_B.shape == (B, m, self.d_dim), f"Stage 2 F_B shape mismatch: got {tuple(F_B.shape)}"
+        F_B_norm = self.fragment_norm(F_B)
+        F_tilde_B = self.film(F_B_norm, c) * mask_B.unsqueeze(-1)
 
-        # DEBUG HOOK: Print raw per-fragment embeddings F_A and F_B (Stage 2 output, before Stage 3 FiLM)
-        if debug_print_fragments and step is not None and step % print_every == 0:
-            self._print_debug_fragment_embeddings(F_A, mask_A, F_B, mask_B, step)
-
-        # STAGE 3: Cell Conditioning Module (FiLM-style with shared gamma/beta functions)
-        # Input F_A, F_B and c -> Output F_tilde_A: (B, n, d), F_tilde_B: (B, m, d)
-        F_tilde_A = self.film(F_A, c)
-        F_tilde_B = self.film(F_B, c)
         assert F_tilde_A.shape == (B, n, self.d_dim), f"Stage 3 F_tilde_A shape mismatch: got {tuple(F_tilde_A.shape)}"
         assert F_tilde_B.shape == (B, m, self.d_dim), f"Stage 3 F_tilde_B shape mismatch: got {tuple(F_tilde_B.shape)}"
+
+        # DEBUG HOOK: Print raw per-fragment embeddings F_tilde_A and F_tilde_B
+        if debug_print_fragments and step is not None and step % print_every == 0:
+            self._print_debug_fragment_embeddings(F_tilde_A, mask_A, F_tilde_B, mask_B, step)
 
         # STAGE 4: Masked Bidirectional Cross-Attention
         # Inputs: F_tilde_A, mask_A, F_tilde_B, mask_B

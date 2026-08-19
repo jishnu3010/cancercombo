@@ -113,27 +113,35 @@ class BivariateHillSolver(nn.Module):
         h2_b = h2.unsqueeze(2)
         alpha_b = alpha.unsqueeze(2)
 
-        # Differentiable computation of normalized dose effects u_A and u_B
+        # Differentiable computation of normalized dose effects u_A and u_B with numerical bounds
+        c1_safe = c1_b.clamp(min=1e-8)
+        c2_safe = c2_b.clamp(min=1e-8)
+        h1_safe = h1_b.clamp(min=1e-4, max=10.0)
+        h2_safe = h2_b.clamp(min=1e-4, max=10.0)
+
+        ratio_A = (dA / c1_safe).clamp(min=self.eps, max=1e4)
+        ratio_B = (dB / c2_safe).clamp(min=self.eps, max=1e4)
+
         u_A = torch.where(
             dA > self.eps,
-            (dA / c1_b).clamp(min=self.eps) ** h1_b,
+            ratio_A ** h1_safe,
             torch.zeros_like(dA)
-        )
+        ).clamp(max=1e6)
 
         u_B = torch.where(
             dB > self.eps,
-            (dB / c2_b).clamp(min=self.eps) ** h2_b,
+            ratio_B ** h2_safe,
             torch.zeros_like(dB)
-        )
+        ).clamp(max=1e6)
 
         # Compute Bivariate Hill surface terms: u_AB shape (B, M, N)
-        u_AB = u_A * u_B
+        u_AB = (u_A * u_B).clamp(max=1e8)
 
         numerator = e0_b + e1_b * u_A + e2_b * u_B + e12_b * alpha_b * u_AB
         denominator = 1.0 + u_A + u_B + alpha_b * u_AB
 
-        # Cell Viability Surface Y
-        Y = numerator / denominator  # Shape: (B, M, N)
+        # Cell Viability Surface Y bounded in [0, 1]
+        Y = (numerator / denominator).clamp(min=0.0, max=1.0)
 
         assert Y.shape == (B, M, N), (
             f"Viability surface Y shape mismatch: expected ({B}, {M}, {N}), got {tuple(Y.shape)}"

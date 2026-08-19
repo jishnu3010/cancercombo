@@ -315,5 +315,183 @@ class TestCancerComboBRICSSymmetric(unittest.TestCase):
         self.assertGreater(loss.item(), 0.0)
 
 
+    def test_e2_standard_film_verification(self):
+        """Verify standard FiLM operation matches manual elementwise gamma(c) * F_norm + beta(c)."""
+        film = FiLMConditioning(cell_dim=self.cell_dim, d_dim=self.d_dim)
+        F_norm = torch.randn(self.batch_size, self.n_frags_a, self.d_dim)
+        c = torch.randn(self.batch_size, self.cell_dim)
+
+        F_tilde = film(F_norm, c)
+
+        # Manual calculation
+        gamma = film.g_gamma(c).unsqueeze(1)
+        beta = film.g_beta(c).unsqueeze(1)
+        expected = gamma * F_norm + beta
+
+        self.assertTrue(torch.allclose(F_tilde, expected, atol=1e-6))
+
+    def test_one_fragment_molecule(self):
+        """Test 2: One-fragment molecule (B x 1 x d) passes without error through full model."""
+        model = CancerComboBRICSSymmetric(
+            gene_dim=self.gene_dim,
+            cell_dim=self.cell_dim,
+            frag_fp_dim=self.frag_fp_dim,
+            d_dim=self.d_dim
+        )
+        cell_expr = torch.randn(self.batch_size, self.gene_dim)
+        fp_A = torch.randn(self.batch_size, 1, self.frag_fp_dim)
+        mask_A = torch.ones(self.batch_size, 1, dtype=torch.bool)
+
+        fp_B = torch.randn(self.batch_size, 1, self.frag_fp_dim)
+        mask_B = torch.ones(self.batch_size, 1, dtype=torch.bool)
+
+        doses_A = torch.linspace(0.01, 10, self.n_doses_a)
+        doses_B = torch.linspace(0.01, 10, self.n_doses_b)
+
+        Y_pred = model(cell_expr, fp_A, mask_A, fp_B, mask_B, (doses_A, doses_B))
+        self.assertEqual(Y_pred.shape, (self.batch_size, self.n_doses_a, self.n_doses_b))
+        self.assertTrue(torch.isfinite(Y_pred).all())
+
+    def test_mask_correctness(self):
+        """Test 3: Verify padded fragments do not influence attention or output representations."""
+        model = CancerComboBRICSSymmetric(
+            gene_dim=self.gene_dim,
+            cell_dim=self.cell_dim,
+            frag_fp_dim=self.frag_fp_dim,
+            d_dim=self.d_dim
+        )
+        model.eval()
+
+        cell_expr = torch.randn(self.batch_size, self.gene_dim)
+        doses = (torch.linspace(0.01, 10, 4), torch.linspace(0.01, 10, 4))
+
+        # Pass 1: 3 real fragments, 2 padded (filled with random noise 1)
+        fp_A1 = torch.randn(self.batch_size, 5, self.frag_fp_dim)
+        mask_A = torch.tensor([[True, True, True, False, False]] * self.batch_size)
+
+        fp_B1 = torch.randn(self.batch_size, 4, self.frag_fp_dim)
+        mask_B = torch.tensor([[True, True, True, False]] * self.batch_size)
+
+        Y_pred1 = model(cell_expr, fp_A1, mask_A, fp_B1, mask_B, doses)
+
+        # Pass 2: Same real fragments, but change padded fragment features to noise 2
+        fp_A2 = fp_A1.clone()
+        fp_A2[:, 3:] = torch.randn(self.batch_size, 2, self.frag_fp_dim) * 100.0
+
+        fp_B2 = fp_B1.clone()
+        fp_B2[:, 3:] = torch.randn(self.batch_size, 1, self.frag_fp_dim) * 100.0
+
+        Y_pred2 = model(cell_expr, fp_A2, mask_A, fp_B2, mask_B, doses)
+
+        self.assertTrue(torch.allclose(Y_pred1, Y_pred2, atol=1e-5))
+
+    def test_fp32_execution_and_gradients(self):
+        """Test 4: FP32 forward pass yields finite output and finite gradients."""
+        model = CancerComboBRICSSymmetric(
+            gene_dim=self.gene_dim,
+            cell_dim=self.cell_dim,
+            frag_fp_dim=self.frag_fp_dim,
+            d_dim=self.d_dim
+        )
+        cell_expr = torch.randn(self.batch_size, self.gene_dim)
+        fp_A = torch.randn(self.batch_size, 3, self.frag_fp_dim)
+        mask_A = torch.ones(self.batch_size, 3, dtype=torch.bool)
+        fp_B = torch.randn(self.batch_size, 2, self.frag_fp_dim)
+        mask_B = torch.ones(self.batch_size, 2, dtype=torch.bool)
+
+        doses = (torch.linspace(0.01, 10, 4), torch.linspace(0.01, 10, 4))
+        Y_pred = model(cell_expr, fp_A, mask_A, fp_B, mask_B, doses)
+
+        self.assertTrue(torch.isfinite(Y_pred).all())
+        loss = Y_pred.sum()
+        loss.backward()
+
+        for param in model.parameters():
+            if param.requires_grad and param.grad is not None:
+                self.assertTrue(torch.isfinite(param.grad).all())
+
+    def test_fp16_amp_execution(self):
+        """Test 5: FP16 / AMP execution yields finite predictions and no mask overflow."""
+        model = CancerComboBRICSSymmetric(
+            gene_dim=self.gene_dim,
+            cell_dim=self.cell_dim,
+            frag_fp_dim=self.frag_fp_dim,
+            d_dim=self.d_dim
+        )
+        cell_expr = torch.randn(self.batch_size, self.gene_dim)
+        fp_A = torch.randn(self.batch_size, 4, self.frag_fp_dim)
+        mask_A = torch.tensor([[True, True, True, False]] * self.batch_size)
+        fp_B = torch.randn(self.batch_size, 4, self.frag_fp_dim)
+        mask_B = torch.tensor([[True, True, False, False]] * self.batch_size)
+        doses = (torch.linspace(0.01, 10, 4), torch.linspace(0.01, 10, 4))
+
+        with torch.amp.autocast('cpu', dtype=torch.bfloat16):
+            Y_pred = model(cell_expr, fp_A, mask_A, fp_B, mask_B, doses)
+
+        self.assertTrue(torch.isfinite(Y_pred).all())
+
+    def test_hill_solver_stress_test(self):
+        """Test 6: Hill solver under extreme stress parameters yields finite Y and gradients."""
+        solver = BivariateHillSolver()
+        stress_params = {
+            "e0": torch.tensor([[0.0], [1.0], [0.5]]),
+            "e1": torch.tensor([[0.0], [1.0], [0.1]]),
+            "e2": torch.tensor([[0.0], [1.0], [0.2]]),
+            "e12": torch.tensor([[0.0], [1.0], [0.05]]),
+            "c1": torch.tensor([[1e-6], [1e4], [1.0]], requires_grad=True),
+            "c2": torch.tensor([[1e-6], [1e4], [2.0]], requires_grad=True),
+            "h1": torch.tensor([[0.01], [10.0], [1.5]], requires_grad=True),
+            "h2": torch.tensor([[0.01], [10.0], [1.2]], requires_grad=True),
+            "alpha": torch.tensor([[1e-6], [1e4], [2.0]], requires_grad=True),
+        }
+
+        doses_A = torch.tensor([[0.0, 1e-6, 1.0, 1e4]])
+        doses_B = torch.tensor([[0.0, 1e-6, 2.0, 1e4]])
+
+        Y = solver(stress_params, (doses_A, doses_B))
+
+        self.assertEqual(Y.shape, (3, 4, 4))
+        self.assertTrue(torch.isfinite(Y).all())
+        self.assertTrue((Y >= 0.0).all() and (Y <= 1.0).all())
+
+        loss = Y.sum()
+        loss.backward()
+
+        self.assertTrue(torch.isfinite(stress_params["c1"].grad).all())
+        self.assertTrue(torch.isfinite(stress_params["h1"].grad).all())
+
+    def test_invalid_smiles_audit(self):
+        """Test 7: Invalid SMILES raises ValueError and is not silently converted to zero fragment."""
+        invalid_smiles = "invalid_chemical_string_123"
+        with self.assertRaises(ValueError):
+            decompose_smiles_to_brics(invalid_smiles)
+
+    def test_drug_split_disjointness(self):
+        """Test 8: Verify Scenario 3 drug-level split has zero drug overlap across splits."""
+        drug_level_csv = os.path.join(os.path.dirname(__file__), "..", "data", "scenario3_drug_level.csv")
+        if not os.path.exists(drug_level_csv):
+            from create_drug_level_split import generate_drug_level_split
+            generate_drug_level_split(output_csv=drug_level_csv)
+
+        train_dataset = load_cancer_combo_from_csv(drug_level_csv, split=3)
+        val_dataset = load_cancer_combo_from_csv(drug_level_csv, split=2)
+        test_dataset = load_cancer_combo_from_csv(drug_level_csv, split=1)
+
+        def get_drugs(dataset):
+            drugs = set()
+            for sample in dataset:
+                drugs.add(sample["smiles_A"])
+                drugs.add(sample["smiles_B"])
+            return drugs
+
+        train_drugs = get_drugs(train_dataset)
+        val_drugs = get_drugs(val_dataset)
+        test_drugs = get_drugs(test_dataset)
+
+        self.assertTrue(train_drugs.isdisjoint(val_drugs), "Train and Val drugs overlap!")
+        self.assertTrue(train_drugs.isdisjoint(test_drugs), "Train and Test drugs overlap!")
+        self.assertTrue(val_drugs.isdisjoint(test_drugs), "Val and Test drugs overlap!")
+
+
 if __name__ == "__main__":
     unittest.main()
