@@ -7,6 +7,7 @@ import sys
 import os
 import unittest
 import torch
+import numpy as np
 
 # Ensure package is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -133,7 +134,7 @@ class TestCancerComboBRICSSymmetric(unittest.TestCase):
         raw_params = heads(r_final)
         params = transform(raw_params)
 
-        expected_keys = {"e0", "e1", "e2", "e12", "c1", "c2", "h1", "h2", "alpha"}
+        expected_keys = {"e0", "e1", "e2", "e12", "c1", "c2", "h1", "h2", "alpha", "log_c1", "log_c2"}
         self.assertEqual(set(params.keys()), expected_keys)
 
         for k, v in params.items():
@@ -491,6 +492,38 @@ class TestCancerComboBRICSSymmetric(unittest.TestCase):
         self.assertTrue(train_drugs.isdisjoint(val_drugs), "Train and Val drugs overlap!")
         self.assertTrue(train_drugs.isdisjoint(test_drugs), "Train and Test drugs overlap!")
         self.assertTrue(val_drugs.isdisjoint(test_drugs), "Val and Test drugs overlap!")
+
+    def test_missing_cell_line_raises_loud_error(self):
+        """Test 9: Verify missing cell line raises explicit ValueError and halts execution (NO silent random fallback)."""
+        from cancer_combo_brics.cell_expression import CellExpressionLoader
+        loader = CellExpressionLoader(csv_path=os.path.join(os.path.dirname(__file__), "..", "data", "cell_line_gene_expr.csv"))
+        with self.assertRaises(ValueError):
+            loader.get_cell_expression("NON_EXISTENT_CELL_LINE_XYZ_123")
+
+    def test_log_space_ec50_bounds(self):
+        """Test 10: Verify ConstraintTransform EC50 (c1, c2) operate in log-space bounded in [10^-11, 10^-3] M."""
+        from cancer_combo_brics.constraint_transform import ConstraintTransform
+        transform = ConstraintTransform(log_c_min=-11.0, log_c_max=-3.0)
+        raw_params = {
+            "e0": torch.tensor([[0.0]]), "e1": torch.tensor([[0.0]]), "e2": torch.tensor([[0.0]]), "e12": torch.tensor([[0.0]]),
+            "c1": torch.tensor([[-100.0]]), "c2": torch.tensor([[100.0]]),
+            "h1": torch.tensor([[0.5]]), "h2": torch.tensor([[0.5]]), "alpha": torch.tensor([[0.1]])
+        }
+        params = transform(raw_params)
+        self.assertGreaterEqual(params["c1"].item(), 1e-11)
+        self.assertLessEqual(params["c2"].item(), 1e-3)
+        self.assertTrue(torch.isfinite(params["c1"]).all())
+        self.assertTrue(torch.isfinite(params["c2"]).all())
+
+    def test_brics_cache_reproducibility(self):
+        """Test 11: Verify BRICSCache produces identical precomputed features."""
+        from cancer_combo_brics.brics_cache import BRICSCache
+        cache = BRICSCache(cache_file=None)
+        smiles = "CC(=O)OC1=CC=CC=C1C(=O)O"
+        frags1, fps1 = cache.get_or_compute_brics(smiles)
+        frags2, fps2 = cache.get_or_compute_brics(smiles)
+        self.assertEqual(frags1, frags2)
+        np.testing.assert_array_equal(fps1, fps2)
 
 
 if __name__ == "__main__":

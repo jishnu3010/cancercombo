@@ -2,11 +2,17 @@
 Constraint & Transform Stage Module for CancerCombo-BRICS-Symmetric.
 
 Applies parameter-appropriate constraints and mathematical transformations:
-    - Sigmoid for viability/efficacy bounds (e0, e1, e2, e12) in [0, 1]
-    - Softplus for positivity on EC50s (c1, c2), Hill slopes (h1, h2), and interaction term (alpha)
+    - e0, e1, e2, e12: Sigmoid (viability bounds in [0, 1])
+    - c1, c2: Bounded log10-space parameterization:
+          log_c = log_c_min + (log_c_max - log_c_min) * Sigmoid(raw_c)
+          C = 10 ** log_c
+      Operates smoothly in neural log-space while passing physical concentrations (c1, c2 > 0) to solver.
+    - h1, h2: Softplus + 0.1 (Hill slope positivity > 0)
+    - alpha: Softplus + 1e-4 (Synergy interaction > 0)
 """
 
-from typing import Dict
+from typing import Dict, Tuple
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,18 +20,19 @@ import torch.nn.functional as F
 
 class ConstraintTransform(nn.Module):
     """
-    Explicit Constraint and Transformation module.
+    Explicit Constraint and Transformation module with log-space EC50 parameterization.
 
-    Applies parameter-appropriate transformations:
-        - e0: 0.5 + 0.6 * Sigmoid (baseline viability ~1.0)
-        - e1, e2, e12: Sigmoid (efficacy bounds in [0, 1])
-        - c1, c2: Softplus + 1e-4 (EC50 positivity > 0)
-        - h1, h2: Softplus + 0.1 (Hill slope positivity > 0)
-        - alpha: Softplus + 1e-4 (Synergy interaction > 0)
+    Args:
+        log_c_min: Lower bound for log10(EC50) concentration (default: -11.0 -> 10^-11 M).
+        log_c_max: Upper bound for log10(EC50) concentration (default: -3.0 -> 10^-3 M).
     """
 
-    def __init__(self):
+    def __init__(self, log_c_min: float = -11.0, log_c_max: float = -3.0):
         super().__init__()
+        self.log_c_min = log_c_min
+        self.log_c_max = log_c_max
+        self.log_range = log_c_max - log_c_min
+        self.ln10 = math.log(10.0)
 
     def forward(self, raw_params: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
@@ -42,8 +49,12 @@ class ConstraintTransform(nn.Module):
         e2 = torch.sigmoid(raw_params["e2"])
         e12 = torch.sigmoid(raw_params["e12"])
 
-        c1 = F.softplus(raw_params["c1"]) + 1e-4
-        c2 = F.softplus(raw_params["c2"]) + 1e-4
+        # Log-space EC50 parameterization
+        log_c1 = self.log_c_min + self.log_range * torch.sigmoid(raw_params["c1"])
+        log_c2 = self.log_c_min + self.log_range * torch.sigmoid(raw_params["c2"])
+
+        c1 = torch.exp(log_c1 * self.ln10)
+        c2 = torch.exp(log_c2 * self.ln10)
 
         h1 = F.softplus(raw_params["h1"]) + 0.1
         h2 = F.softplus(raw_params["h2"]) + 0.1
@@ -59,10 +70,12 @@ class ConstraintTransform(nn.Module):
             "c2": c2,
             "h1": h1,
             "h2": h2,
-            "alpha": alpha
+            "alpha": alpha,
+            "log_c1": log_c1,
+            "log_c2": log_c2
         }
 
-        # Shape assertions and positivity assertions
+        # Shape assertions
         first_key = list(params.keys())[0]
         B = params[first_key].size(0)
         for k, v in params.items():

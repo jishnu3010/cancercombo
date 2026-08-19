@@ -1,29 +1,30 @@
 """
-Dataset and DataLoader Utilities for CancerCombo-BRICS-Symmetric.
+Dataset and Data Loading Module for CancerCombo-BRICS-Symmetric.
 
-Provides CancerComboDataset, load_cancer_combo_from_csv parser for datasets like
-data/scenario3_drug1.csv (NCI-ALMANAC), and custom batch collation for PyTorch DataLoader.
+Enforces:
+    1. Loading real 976-dimensional landmark gene expression profiles via CellExpressionLoader.
+    2. Strict loud error handling: NO silent synthetic random vector fallback or hash(cell_id).
+    3. Fast precomputed BRICS fragment feature lookup via BRICSCache.
+    4. Target range auditing and explicit clipping to [0, 1].
+    5. Arbitrary M x N dose grid support.
 """
 
 import os
 import csv
 import json
-from typing import List, Dict, Union, Tuple, Optional
-import torch
+from typing import Dict, List, Tuple, Union, Optional
 import numpy as np
-from torch.utils.data import Dataset, DataLoader
+import torch
+from torch.utils.data import Dataset
+
 from .brics_utils import collate_brics_fragments
+from .cell_expression import CellExpressionLoader
+from .brics_cache import BRICSCache
 
 
 class CancerComboDataset(Dataset):
     """
-    PyTorch Dataset for Cancer Drug Combination Dose-Response Viability Surfaces.
-
-    Expected Input Format:
-        - drug_pairs: List of tuples (cell_line_id, smiles_A, smiles_B).
-        - dose_grids: List of tuples (doses_A, doses_B) where doses_A is (M,) and doses_B is (N,).
-        - viability_surfaces: List of tensors of shape (M, N) representing percentage viability in [0, 1].
-        - cell_expr_dict: Dict mapping cell_line_id -> (976,) gene expression tensor.
+    CancerCombo Dataset class storing drug combination samples.
     """
 
     def __init__(
@@ -48,6 +49,11 @@ class CancerComboDataset(Dataset):
         cell_id, smiles_A, smiles_B = self.drug_pairs[idx]
         doses_A, doses_B = self.dose_grids[idx]
         Y_true = self.viability_surfaces[idx]
+
+        if cell_id not in self.cell_expr_dict:
+            raise ValueError(
+                f"[CRITICAL DATA ERROR] Cell line '{cell_id}' missing from expression dictionary during dataset indexing!"
+            )
         cell_expr = self.cell_expr_dict[cell_id]
 
         return {
@@ -68,9 +74,6 @@ def collate_cancer_combo_batch(
 ) -> Dict[str, Union[torch.Tensor, List]]:
     """
     Custom collate function for CancerComboDataset.
-
-    Collates a list of dataset samples into padded tensors with BRICS fragment padding masks.
-    Also preserves SMILES strings and pre-existing BRICS fragment lists for inspection.
     """
     cell_expr_list = [item["cell_expr"] for item in batch]
     smiles_A_list = [item["smiles_A"] for item in batch]
@@ -82,11 +85,10 @@ def collate_cancer_combo_batch(
     # Stack cell line expressions: (B, 976)
     cell_expr = torch.stack(cell_expr_list, dim=0).to(device)
 
-    # Collate BRICS fragments for Drug A and Drug B into padded tensors, boolean masks, and fragment lists
+    # Collate BRICS fragments for Drug A and Drug B into padded tensors and boolean masks
     fp_A, mask_A, frags_A_list = collate_brics_fragments(smiles_A_list, n_bits=frag_fp_dim, device=device)
     fp_B, mask_B, frags_B_list = collate_brics_fragments(smiles_B_list, n_bits=frag_fp_dim, device=device)
 
-    # Stack dose concentrations and ground truth viability surface matrices
     doses_A = torch.stack(doses_A_list, dim=0).to(device)
     doses_B = torch.stack(doses_B_list, dim=0).to(device)
     Y_true = torch.stack(Y_true_list, dim=0).to(device)
@@ -108,52 +110,35 @@ def collate_cancer_combo_batch(
 
 def load_cancer_combo_from_csv(
     csv_path: str,
-    cell_expr_csv: Optional[str] = None,
-    split: Optional[int] = None,
+    cell_expr_csv: Optional[str] = os.path.join("data", "cell_line_gene_expr.csv"),
+    split: Optional[Union[int, List[int]]] = None,
     max_samples: Optional[int] = None,
-    gene_dim: int = 976
+    gene_dim: int = 976,
+    brics_cache: Optional[BRICSCache] = None
 ) -> CancerComboDataset:
     """
-    Loads dataset directly from combination dataset CSV files (such as data/scenario3_drug1.csv).
+    Loads dataset directly from combination dataset CSV files.
 
-    CSV Column Mapping:
-        - smiles_a / smiles_A: SMILES string of Drug A
-        - smiles_b / smiles_B: SMILES string of Drug B
-        - cell_line_name / cell_line_id: Cell line identifier (e.g. 7860, A549, HCT116)
-        - doses_a / doses_A: JSON array string or delimited float list of Drug A concentrations
-        - doses_b / doses_B: JSON array string or delimited float list of Drug B concentrations
-        - viability_matrix / Y_true: JSON 2D array or delimited string of percentage viability values
-        - split (optional): Integer split index for train/val/test filtering.
-
-    Args:
-        csv_path: Path to combination CSV file (e.g., data/scenario3_drug1.csv).
-        cell_expr_csv: Optional path to cell line expression CSV. If None, gene expression
-                       vectors are generated deterministically per unique cell line.
-        split: Optional split index to filter rows (e.g., split=3).
-        max_samples: Optional max sample count limit.
-        gene_dim: Landmark gene count (default: 976).
-
-    Returns:
-        dataset: Configured CancerComboDataset ready for PyTorch DataLoader.
+    Strict validation:
+        - Loads real cell line 976-gene expression vectors via CellExpressionLoader.
+        - Fails loudly if any cell line is missing (NO silent synthetic random fallbacks).
+        - Audits target viability range and explicitly clips targets to [0, 1].
     """
-    # 1. Load Cell Line Expression Dictionary if file provided
-    cell_expr_dict: Dict[str, torch.Tensor] = {}
-    if cell_expr_csv and os.path.exists(cell_expr_csv):
-        with open(cell_expr_csv, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            next(reader)
-            for row in reader:
-                if not row:
-                    continue
-                cell_id = str(row[0]).strip()
-                expr_vals = [float(x) for x in row[1:1 + gene_dim]]
-                if len(expr_vals) < gene_dim:
-                    expr_vals.extend([0.0] * (gene_dim - len(expr_vals)))
-                cell_expr_dict[cell_id] = torch.tensor(expr_vals[:gene_dim], dtype=torch.float32)
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"Combination dataset CSV not found at '{csv_path}'.")
+
+    # 1. Initialize Cell Expression Loader
+    expr_loader = CellExpressionLoader(csv_path=cell_expr_csv, gene_dim=gene_dim)
 
     drug_pairs: List[Tuple[str, str, str]] = []
     dose_grids: List[Tuple[torch.Tensor, torch.Tensor]] = []
     viability_surfaces: List[torch.Tensor] = []
+    required_cell_ids: Set[str] = set()
+
+    # Target statistics tracking
+    raw_min, raw_max = float("inf"), float("-inf")
+    total_elements = 0
+    outside_01_count = 0
 
     # 2. Parse Combination CSV File
     with open(csv_path, "r", encoding="utf-8") as f:
@@ -162,34 +147,29 @@ def load_cancer_combo_from_csv(
             if max_samples and len(drug_pairs) >= max_samples:
                 break
 
-            # Filter by split if specified (safely handles None or missing values)
+            # Filter by split if specified
             if split is not None and row.get("split") is not None:
                 raw_split = str(row["split"]).strip()
                 if raw_split:
                     try:
-                        if int(float(raw_split)) != split:
-                            continue
+                        split_val = int(float(raw_split))
+                        if isinstance(split, (list, tuple, set)):
+                            if split_val not in split:
+                                continue
+                        else:
+                            if split_val != split:
+                                continue
                     except (ValueError, TypeError):
                         pass
 
-            cell_id = str(row.get("cell_line_name") or row.get("cell_line_id") or row.get("cell") or "cell").strip()
+            cell_id = str(row.get("cell_line_name") or row.get("cell_line_id") or row.get("cell") or "").strip()
             smiles_A = str(row.get("smiles_a") or row.get("smiles_A") or "").strip()
             smiles_B = str(row.get("smiles_b") or row.get("smiles_B") or "").strip()
 
-            # Skip missing, empty, or invalid 'nan' SMILES strings
-            if not smiles_A or not smiles_B or smiles_A.lower() in ("nan", "none", "null") or smiles_B.lower() in ("nan", "none", "null"):
+            if not cell_id or not smiles_A or not smiles_B or smiles_A.lower() in ("nan", "none", "null") or smiles_B.lower() in ("nan", "none", "null"):
                 continue
 
-            # Ensure cell line landmark gene expression exists in dict
-            if cell_id not in cell_expr_dict:
-                # Deterministic seed from cell_id string hash
-                seed = abs(hash(cell_id)) % (2**31 - 1)
-                rng = np.random.RandomState(seed)
-                cell_expr_dict[cell_id] = torch.from_numpy(
-                    rng.normal(loc=0.0, scale=1.0, size=gene_dim).astype(np.float32)
-                )
-
-            # Parse doses_a and doses_b
+            # Parse doses
             doses_a_str = str(row.get("doses_a") or row.get("doses_A") or "").strip()
             doses_b_str = str(row.get("doses_b") or row.get("doses_B") or "").strip()
 
@@ -214,7 +194,7 @@ def load_cancer_combo_from_csv(
             doses_A = torch.tensor(doses_a_list, dtype=torch.float32)
             doses_B = torch.tensor(doses_b_list, dtype=torch.float32)
 
-            # Parse viability matrix from JSON 2D array or delimited string
+            # Parse viability matrix
             viab_str = str(row.get("viability_matrix") or row.get("Y_true") or row.get("viability") or "").strip()
             if viab_str.startswith("["):
                 try:
@@ -223,7 +203,6 @@ def load_cancer_combo_from_csv(
                     import ast
                     matrix_raw = ast.literal_eval(viab_str)
                 matrix_arr = np.array(matrix_raw, dtype=np.float32)
-                # Normalize percentage (0 to 100) to fraction (0.0 to 1.0)
                 if matrix_arr.max() > 2.0:
                     matrix_arr = matrix_arr / 100.0
                 Y_true = torch.from_numpy(matrix_arr)
@@ -237,13 +216,36 @@ def load_cancer_combo_from_csv(
                 if Y_true.max() > 2.0:
                     Y_true = Y_true / 100.0
 
+            # Target Statistics Audit
+            raw_min = min(raw_min, float(Y_true.min()))
+            raw_max = max(raw_max, float(Y_true.max()))
+            total_elements += Y_true.numel()
+            outside_01_count += int(((Y_true < 0.0) | (Y_true > 1.0)).sum())
+
+            # Explicitly clip target viability to valid physical range [0.0, 1.0]
+            Y_true_clipped = torch.clamp(Y_true, 0.0, 1.0)
+
             drug_pairs.append((cell_id, smiles_A, smiles_B))
             dose_grids.append((doses_A, doses_B))
-            viability_surfaces.append(Y_true)
+            viability_surfaces.append(Y_true_clipped)
+            required_cell_ids.add(cell_id)
+
+    # 3. Fit Normalization & Retrieve Real Gene Expression
+    expr_loader.fit_normalization(train_cell_ids=required_cell_ids)
+
+    # Verify all required cell lines exist in expr_loader (FAILS LOUDLIES if missing)
+    for cid in required_cell_ids:
+        expr_loader.get_cell_expression(cid)
+
+    # Print Target Range Audit Summary
+    print(f"Loaded {len(drug_pairs)} samples from '{csv_path}' (split={split}).")
+    if total_elements > 0:
+        pct_outside = (outside_01_count / total_elements) * 100.0
+        print(f"  Target Range Audit: Raw Min={raw_min:.4f}, Raw Max={raw_max:.4f} | {pct_outside:.2f}% values outside [0, 1] (clipped to [0, 1]).")
 
     return CancerComboDataset(
         drug_pairs=drug_pairs,
         dose_grids=dose_grids,
         viability_surfaces=viability_surfaces,
-        cell_expr_dict=cell_expr_dict
+        cell_expr_dict=expr_loader.cell_expr_dict
     )
