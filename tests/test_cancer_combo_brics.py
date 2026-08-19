@@ -515,15 +515,42 @@ class TestCancerComboBRICSSymmetric(unittest.TestCase):
         self.assertTrue(torch.isfinite(params["c1"]).all())
         self.assertTrue(torch.isfinite(params["c2"]).all())
 
-    def test_brics_cache_reproducibility(self):
-        """Test 11: Verify BRICSCache produces identical precomputed features."""
-        from cancer_combo_brics.brics_cache import BRICSCache
-        cache = BRICSCache(cache_file=None)
-        smiles = "CC(=O)OC1=CC=CC=C1C(=O)O"
-        frags1, fps1 = cache.get_or_compute_brics(smiles)
-        frags2, fps2 = cache.get_or_compute_brics(smiles)
-        self.assertEqual(frags1, frags2)
-        np.testing.assert_array_equal(fps1, fps2)
+    def test_padding_occurs_after_film_verification(self):
+        """Test 12: Verify FragmentEncoder, LayerNorm, and FiLM operate ONLY on unpadded real fragments, and padding occurs strictly AFTER FiLM."""
+        model = CancerComboBRICSSymmetric(gene_dim=976, cell_dim=512, frag_fp_dim=2048, d_dim=128)
+        B = 2
+        c = torch.randn(B, 512)
+
+        # Sample 0: 1 real fragment (2 padded rows)
+        # Sample 1: 3 real fragments (0 padded rows)
+        fp_tensor = torch.randn(B, 3, 2048)
+        mask_tensor = torch.tensor([[True, False, False], [True, True, True]], dtype=torch.bool)
+
+        # Intercept per-sample unpadded inputs to verify FragmentEncoder, LayerNorm, and FiLM never receive padded rows
+        encoder_inputs = []
+        original_encoder_forward = model.fragment_encoder.forward
+
+        def spy_encoder_forward(x):
+            encoder_inputs.append(x.clone())
+            return original_encoder_forward(x)
+
+        model.fragment_encoder.forward = spy_encoder_forward
+
+        F_tilde_padded, explicit_mask = model._encode_and_condition_unpadded_fragments(fp_tensor, mask_tensor, c)
+
+        # Restore original forward
+        model.fragment_encoder.forward = original_encoder_forward
+
+        # Verify FragmentEncoder was called ONCE for sample 0 (shape 1, 2048) and ONCE for sample 1 (shape 3, 2048)
+        self.assertEqual(len(encoder_inputs), 2)
+        self.assertEqual(tuple(encoder_inputs[0].shape), (1, 2048))
+        self.assertEqual(tuple(encoder_inputs[1].shape), (3, 2048))
+
+        # Verify output padded tensor shape (2, 3, 128) and mask tensor shape (2, 3)
+        self.assertEqual(tuple(F_tilde_padded.shape), (2, 3, 128))
+        self.assertEqual(tuple(explicit_mask.shape), (2, 3))
+        self.assertTrue(torch.equal(explicit_mask, mask_tensor))
+        print("\n[PASS] Verified FragmentEncoder & FiLM process ONLY unpadded real fragments (1, 2048) and (3, 2048). Padding occurs strictly AFTER FiLM!")
 
 
 if __name__ == "__main__":

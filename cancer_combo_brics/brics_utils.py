@@ -95,6 +95,44 @@ def fragment_to_morgan_fp(frag_smiles: str, n_bits: int = 2048, radius: int = 2)
     return fp_array
 
 
+def collate_unpadded_brics_fragments(
+    smiles_list: List[str],
+    n_bits: int = 2048,
+    radius: int = 2,
+    device: Union[torch.device, str] = "cpu"
+) -> Tuple[List[torch.Tensor], List[List[str]]]:
+    """
+    Collates a list of molecule SMILES into UNPADDED 2D fragment fingerprint tensors for each sample.
+
+    Args:
+        smiles_list: List of B SMILES strings.
+        n_bits: Morgan FP dimension (2048).
+        radius: Fingerprint radius (2).
+        device: PyTorch device.
+
+    Returns:
+        unpadded_fp_list: List of B tensors, where tensor i has shape (N_real_i, n_bits) containing ONLY real fragments.
+        all_fragments: List of fragment lists for each molecule in batch.
+    """
+    unpadded_fp_list: List[torch.Tensor] = []
+    all_fragments: List[List[str]] = []
+
+    for smiles in smiles_list:
+        frags = decompose_smiles_to_brics(smiles)
+        all_fragments.append(frags)
+
+        fp_rows = []
+        for frag_smi in frags:
+            fp_arr = fragment_to_morgan_fp(frag_smi, n_bits=n_bits, radius=radius)
+            fp_rows.append(fp_arr)
+
+        # Unpadded 2D tensor for single sample i: shape (N_real_i, 2048)
+        unpadded_tensor = torch.from_numpy(np.array(fp_rows, dtype=np.float32)).to(device)
+        unpadded_fp_list.append(unpadded_tensor)
+
+    return unpadded_fp_list, all_fragments
+
+
 def collate_brics_fragments(
     smiles_list: List[str],
     n_bits: int = 2048,

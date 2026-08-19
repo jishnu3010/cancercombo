@@ -116,6 +116,60 @@ class CancerComboBRICSSymmetric(nn.Module):
         # 9. Differentiable Bivariate Hill Surface Solver
         self.bivariate_solver = BivariateHillSolver()
 
+    def _encode_and_condition_unpadded_fragments(
+        self,
+        fp_tensor: torch.Tensor,
+        mask_tensor: torch.Tensor,
+        c: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        STAGE 1 & STAGE 2 UNPADDED EXECUTION FLOW:
+            1. Extract UNPADDED real fragment fingerprints for each sample in batch.
+            2. Pass real fragment fingerprints through shared FragmentEncoder -> (N_real_i, d).
+            3. Pass real fragment embeddings through shared Fragment LayerNorm -> (N_real_i, d).
+            4. Pass real fragment embeddings through shared Standard E2 FiLM -> (N_real_i, d).
+            5. Pad conditioned fragment representations AFTER FiLM to max batch sequence length.
+            6. Construct explicit boolean padding mask (B, n_max).
+
+        Ensures FragmentEncoder, LayerNorm, and FiLM NEVER receive padded zero rows!
+        """
+        B = fp_tensor.size(0)
+        device = fp_tensor.device
+
+        unpadded_conditioned_list: List[torch.Tensor] = []
+        max_len = 0
+
+        for i in range(B):
+            # Extract real unpadded fragment fingerprints for sample i: shape (N_real_i, 2048)
+            real_mask_i = mask_tensor[i]
+            real_fps_i = fp_tensor[i, real_mask_i]  # (N_real_i, 2048)
+
+            if real_fps_i.size(0) == 0:
+                # Fallback for 0-fragment edge case: single zero fingerprint
+                real_fps_i = torch.zeros(1, fp_tensor.size(-1), device=device)
+
+            # STAGE 1 (UNPADDED): FragmentEncoder -> LayerNorm -> Standard E2 FiLM
+            F_real_i = self.fragment_encoder(real_fps_i)                      # (N_real_i, d)
+            F_norm_i = self.fragment_norm(F_real_i)                           # (N_real_i, d)
+            F_tilde_i = self.film(F_norm_i.unsqueeze(0), c[i:i+1]).squeeze(0)  # (N_real_i, d)
+
+            unpadded_conditioned_list.append(F_tilde_i)
+            if F_tilde_i.size(0) > max_len:
+                max_len = F_tilde_i.size(0)
+
+        max_len = max(max_len, fp_tensor.size(1))
+
+        # STAGE 2 (PADDING AFTER FILM): Pad to max batch sequence length and construct boolean mask
+        F_tilde_padded = torch.zeros(B, max_len, self.d_dim, device=device)
+        explicit_mask = torch.zeros(B, max_len, dtype=torch.bool, device=device)
+
+        for i in range(B):
+            n_real_i = unpadded_conditioned_list[i].size(0)
+            F_tilde_padded[i, :n_real_i] = unpadded_conditioned_list[i]
+            explicit_mask[i, :n_real_i] = True
+
+        return F_tilde_padded, explicit_mask
+
     def _print_debug_fragment_embeddings(
         self,
         F_A: torch.Tensor,
@@ -211,18 +265,18 @@ class CancerComboBRICSSymmetric(nn.Module):
         c = self.cell_encoder(cell_expr)
         n, m = fp_A.size(1), fp_B.size(1)
 
-        # STAGE 2 & 3: Fragment Encoder -> Final LayerNorm -> Standard FiLM Conditioning -> Padding Masking
+        # STAGE 2 & 3: FragmentEncoder (UNPADDED) -> LayerNorm (UNPADDED) -> Standard E2 FiLM (UNPADDED) -> Pad AFTER FiLM & Mask
         # Mathematical sequence:
-        # F_A = Encoder(FP_A)
-        # F_A_norm = LayerNorm(F_A)
-        # F_tilde_A = (gamma(c) * F_A_norm + beta(c)) * mask_A
-        F_A = self.fragment_encoder(fp_A)
-        F_A_norm = self.fragment_norm(F_A)
-        F_tilde_A = self.film(F_A_norm, c) * mask_A.unsqueeze(-1)
+        # 1. Unpadded real fragments -> shared FragmentEncoder -> (N_real, d)
+        # 2. Unpadded real fragments -> shared LayerNorm -> (N_real, d)
+        # 3. Unpadded real fragments -> shared Standard E2 FiLM -> (N_real, d)
+        # 4. Pad conditioned fragment vectors AFTER FiLM to max sequence length -> (B, n_max, d)
+        # 5. Generate explicit boolean mask -> (B, n_max)
+        F_tilde_A, mask_A_post = self._encode_and_condition_unpadded_fragments(fp_A, mask_A, c)
+        F_tilde_B, mask_B_post = self._encode_and_condition_unpadded_fragments(fp_B, mask_B, c)
 
-        F_B = self.fragment_encoder(fp_B)
-        F_B_norm = self.fragment_norm(F_B)
-        F_tilde_B = self.film(F_B_norm, c) * mask_B.unsqueeze(-1)
+        mask_A = mask_A_post
+        mask_B = mask_B_post
 
         assert F_tilde_A.shape == (B, n, self.d_dim), f"Stage 3 F_tilde_A shape mismatch: got {tuple(F_tilde_A.shape)}"
         assert F_tilde_B.shape == (B, m, self.d_dim), f"Stage 3 F_tilde_B shape mismatch: got {tuple(F_tilde_B.shape)}"
