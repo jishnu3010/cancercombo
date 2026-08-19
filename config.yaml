@@ -1,7 +1,7 @@
 # CancerCombo-BRICS-Symmetric Configuration File
 
 dataset:
-  data_csv: "data/scenario3_drug1.csv"
+  data_csv: "data/scenario3_drug_level.csv"
   train_split: 3
   val_split: 2
   test_split: 1
