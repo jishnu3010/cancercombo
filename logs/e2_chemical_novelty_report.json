@@ -1,0 +1,162 @@
+{
+  "novelty_per_test_drug": {
+    "CS(=O)(=O)OCCCCOS(=O)(=O)C": {
+      "nearest_train_drug": "CCCCCOC(=O)NC1=NC(=O)N(C=C1F)C2C(C(C(O2)C)O)O",
+      "tanimoto_similarity": 0.11475409836065574,
+      "nearest_scaffold_drug": "",
+      "scaffold_similarity": 0.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "Low similarity"
+    },
+    "C1=CC=C(C(=C1)C(C2=CC=C(C=C2)Cl)C(Cl)Cl)Cl": {
+      "nearest_train_drug": "C1=CC(=CC=C1C#N)C(C2=CC=C(C=C2)C#N)N3C=NC=N3",
+      "tanimoto_similarity": 0.125,
+      "nearest_scaffold_drug": "",
+      "scaffold_similarity": 0.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "Low similarity"
+    },
+    "CC1CCCC2(C(O2)CC(NC(=O)CC(C(C(=O)C(C1O)C)(C)C)O)C(=CC3=CSC(=N3)C)C)C": {
+      "nearest_train_drug": "CC1=CC2C(CCC3(C2CCC3(C(=O)C)OC(=O)C)C)C4(C1=CC(=O)CC4)C",
+      "tanimoto_similarity": 0.16161616161616163,
+      "nearest_scaffold_drug": "",
+      "scaffold_similarity": 0.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "Low similarity"
+    },
+    "CCC1(CC2CC(C3=C(CCN(C2)C1)C4=CC=CC=C4N3)(C5=C(C=C6C(=C5)C78CCN9C7C(C=CC9)(C(C(C8N6C=O)(C(=O)OC)O)OC(=O)C)CC)OC)C(=O)OC)O.OS(=O)(=O)O": {
+      "nearest_train_drug": "CCC1(CC2CC(C3=C(CCN(C2)C1)C4=CC=CC=C4N3)(C5=C(C=C6C(=C5)C78CCN9C7C(C=CC9)(C(C(C8N6C)(C(=O)OC)O)OC(=O)C)CC)OC)C(=O)OC)O.OS(=O)(=O)O",
+      "tanimoto_similarity": 0.8962264150943396,
+      "nearest_scaffold_drug": "CCC1(CC2CC(C3=C(CCN(C2)C1)C4=CC=CC=C4N3)(C5=C(C=C6C(=C5)C78CCN9C7C(C=CC9)(C(C(C8N6C)(C(=O)OC)O)OC(=O)C)CC)OC)C(=O)OC)O.OS(=O)(=O)O",
+      "scaffold_similarity": 1.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "High similarity"
+    },
+    "C1CCC(C(C1)[NH-])[NH-].C(=O)(C(=O)O)O.[Pt+2]": {
+      "nearest_train_drug": "C1CC(C1)(C(=O)O)C(=O)O.[NH2-].[NH2-].[Pt+2]",
+      "tanimoto_similarity": 0.28,
+      "nearest_scaffold_drug": "C1CCC(CC1)NC(=O)N(CCCl)N=O",
+      "scaffold_similarity": 1.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "Low similarity"
+    },
+    "CCN(CC)CCCC(C)NC1=C2C=C(C=CC2=NC3=C1C=CC(=C3)Cl)OC.Cl.Cl": {
+      "nearest_train_drug": "COC1=C(C=C2C(=C1)N=CN=C2NC3=CC(=C(C=C3)F)Cl)OCCCN4CCOCC4",
+      "tanimoto_similarity": 0.18947368421052632,
+      "nearest_scaffold_drug": "",
+      "scaffold_similarity": 0.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "Low similarity"
+    },
+    "CN(CC1=CN=C2C(=N1)C(=NC(=N2)N)N)C3=CC=C(C=C3)C(=O)NC(CCC(=O)O)C(=O)O": {
+      "nearest_train_drug": "C#CCC(CC1=CN=C2C(=N1)C(=NC(=N2)N)N)C3=CC=C(C=C3)C(=O)NC(CCC(=O)O)C(=O)O",
+      "tanimoto_similarity": 0.6527777777777778,
+      "nearest_scaffold_drug": "",
+      "scaffold_similarity": 0.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "High similarity"
+    },
+    "C1CC(=O)NC(=O)C1N2C(=O)C3=CC=CC=C3C2=O": {
+      "nearest_train_drug": "CC(CN1CC(=O)NC(=O)C1)N2CC(=O)NC(=O)C2",
+      "tanimoto_similarity": 0.2,
+      "nearest_scaffold_drug": "",
+      "scaffold_similarity": 0.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "Low similarity"
+    },
+    "C1=CN(C=N1)CC(O)(P(=O)(O)O)P(=O)(O)O": {
+      "nearest_train_drug": "C(CN)CNCCSP(=O)(O)O",
+      "tanimoto_similarity": 0.13043478260869565,
+      "nearest_scaffold_drug": "",
+      "scaffold_similarity": 0.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "Low similarity"
+    },
+    "C(CCl)NC(=O)N(CCCl)N=O": {
+      "nearest_train_drug": "C1CCC(CC1)NC(=O)N(CCCl)N=O",
+      "tanimoto_similarity": 0.5277777777777778,
+      "nearest_scaffold_drug": "",
+      "scaffold_similarity": 0.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "High similarity"
+    },
+    "COC1=CC(=CC(=C1O)OC)C2C3C(COC3=O)C(C4=CC5=C(C=C24)OCO5)OC6C(C(C7C(O6)COC(O7)C8=CC=CS8)O)O": {
+      "nearest_train_drug": "CC1OCC2C(O1)C(C(C(O2)OC3C4COC(=O)C4C(C5=CC6=C(C=C35)OCO6)C7=CC(=C(C(=C7)OC)O)OC)O)O",
+      "tanimoto_similarity": 0.7530864197530864,
+      "nearest_scaffold_drug": "",
+      "scaffold_similarity": 0.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "High similarity"
+    },
+    "C1=CC=C(C=C1)NC(=O)CCCCCCC(=O)NO": {
+      "nearest_train_drug": "C1=CC(=CC=C1CCCC(=O)O)N(CCCl)CCCl",
+      "tanimoto_similarity": 0.23404255319148937,
+      "nearest_scaffold_drug": "CC(C)NC(=O)C1=CC=C(C=C1)CNNC.Cl",
+      "scaffold_similarity": 1.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "Low similarity"
+    },
+    "C1CN(CCN1C(=O)CCBr)C(=O)CCBr": {
+      "nearest_train_drug": "C1CC(C1)(C(=O)O)C(=O)O.[NH2-].[NH2-].[Pt+2]",
+      "tanimoto_similarity": 0.13333333333333333,
+      "nearest_scaffold_drug": "",
+      "scaffold_similarity": 0.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "Low similarity"
+    },
+    "CC1=C(C=C(C=C1)NC2=NC=CC(=N2)N(C)C3=CC4=NN(C(=C4C=C3)C)C)S(=O)(=O)N.Cl": {
+      "nearest_train_drug": "CC1=C(C=C(C=C1)C(=O)NC2=CC(=CC(=C2)C(F)(F)F)N3C=C(N=C3)C)NC4=NC=CC(=N4)C5=CN=CC=C5",
+      "tanimoto_similarity": 0.21904761904761905,
+      "nearest_scaffold_drug": "",
+      "scaffold_similarity": 0.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "Low similarity"
+    },
+    "C(CC(=O)O)C(=O)CN.Cl": {
+      "nearest_train_drug": "C1=CC(=CC=C1CCCC(=O)O)N(CCCl)CCCl",
+      "tanimoto_similarity": 0.2,
+      "nearest_scaffold_drug": "",
+      "scaffold_similarity": 0.0,
+      "nearest_brics_drug": "",
+      "brics_overlap": 0.0,
+      "tier": "Low similarity"
+    }
+  },
+  "stratified_performance": {
+    "High similarity": {
+      "rmse": 0.2867439389228821,
+      "mae": 0.16928616166114807,
+      "r2": -0.21923398971557617,
+      "pearson": 0.18318681418895721,
+      "spearman": 0.10159945964132042,
+      "loss": 0.07065533101558685,
+      "count": 153
+    },
+    "Medium similarity": {
+      "count": 0
+    },
+    "Low similarity": {
+      "rmse": 0.21544888615608215,
+      "mae": 0.12181194871664047,
+      "r2": -0.1300809383392334,
+      "pearson": 0.1453493982553482,
+      "spearman": 0.0966918718297965,
+      "loss": 0.04585633663317332,
+      "count": 1637
+    }
+  }
+}
