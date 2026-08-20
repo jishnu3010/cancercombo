@@ -62,13 +62,15 @@ class TestCancerComboBRICSSymmetric(unittest.TestCase):
         self.assertFalse(torch.isnan(F).any())
 
     def test_film_conditioning(self):
-        """Test FiLMConditioning forward pass using shared gamma/beta MLPs."""
+        """Test FiLMConditioning Residual FiLM forward pass and identity initialization."""
         film = FiLMConditioning(cell_dim=self.cell_dim, d_dim=self.d_dim)
         F = torch.randn(self.batch_size, self.n_frags_a, self.d_dim)
         c = torch.randn(self.batch_size, self.cell_dim)
         F_tilde = film(F, c)
         self.assertEqual(F_tilde.shape, F.shape)
         self.assertFalse(torch.isnan(F_tilde).any())
+        # Test identity initialization: at startup, gamma(c)=0 and beta(c)=0, so F_tilde == F
+        self.assertTrue(torch.allclose(F_tilde, F, atol=1e-5), "Residual FiLM identity initialization failed!")
 
     def test_manual_multihead_cross_attention(self):
         """Test ManualMultiHeadCrossAttention module without nn.MultiheadAttention."""
@@ -293,18 +295,18 @@ class TestCancerComboBRICSSymmetric(unittest.TestCase):
         self.assertGreater(loss.item(), 0.0)
 
 
-    def test_e2_standard_film_verification(self):
-        """Verify standard FiLM operation matches manual elementwise gamma(c) * F_norm + beta(c)."""
+    def test_residual_film_verification(self):
+        """Verify Residual FiLM operation matches manual elementwise F_norm + gamma(c) * F_norm + beta(c)."""
         film = FiLMConditioning(cell_dim=self.cell_dim, d_dim=self.d_dim)
         F_norm = torch.randn(self.batch_size, self.n_frags_a, self.d_dim)
         c = torch.randn(self.batch_size, self.cell_dim)
 
         F_tilde = film(F_norm, c)
 
-        # Manual calculation
+        # Manual Residual FiLM calculation
         gamma = film.g_gamma(c).unsqueeze(1)
         beta = film.g_beta(c).unsqueeze(1)
-        expected = gamma * F_norm + beta
+        expected = F_norm + gamma * F_norm + beta
 
         self.assertTrue(torch.allclose(F_tilde, expected, atol=1e-6))
 
