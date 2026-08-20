@@ -48,7 +48,7 @@ def decompose_smiles_to_brics(smiles: str) -> List[str]:
 
     try:
         # BRICSDecompose breaks strategically valid bonds
-        fragments = list(BRICS.BRICSDecompose(mol, keepIntermediate=False))
+        fragments = list(BRICS.BRICSDecompose(mol, keepNonLeafNodes=False))
         if not fragments:
             fragments = [smiles]
         return fragments
