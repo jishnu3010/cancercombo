@@ -21,8 +21,6 @@ from .cell_line_encoder import CellLineEncoder
 from .fragment_encoder import FragmentEncoder
 from .film_conditioning import FiLMConditioning
 from .cross_attention import MaskedBidirectionalCrossAttention, BidirectionalCrossAttention
-from .symmetric_fusion import SymmetricFusion
-from .cell_fusion import CellFusion
 from .parameter_heads import ParameterHeads
 from .constraint_transform import ConstraintTransform
 from .bivariate_hill_solver import BivariateHillSolver
@@ -92,28 +90,20 @@ class CancerComboBRICSSymmetric(nn.Module):
             shared_weights=shared_attn_weights
         )
 
-        # 5. Symmetric A/B Fusion
-        self.symmetric_fusion = SymmetricFusion(d_dim=d_dim)
-
-        # 6. Cell Fusion
-        self.cell_fusion = CellFusion(
-            d_dim=d_dim,
-            cell_dim=cell_dim
-        )
-
-        # 7. Parameter Heads with Shared Single-Drug Trunk
+        # 5. Parameter Heads (ONE Unified 9-Output Parameter MLP: 1024 -> 512 -> 256 -> 9)
         fusion_dim = 4 * d_dim + cell_dim
         self.parameter_heads = ParameterHeads(
             d_dim=d_dim,
             cell_dim=cell_dim,
-            hidden_dim=256,
-            in_dim=fusion_dim
+            hidden_dim=512,
+            in_dim=fusion_dim,
+            num_params=9
         )
 
-        # 8. Constraint / Transform Stage
+        # 6. Constraint / Transform Stage
         self.constraint_transform = ConstraintTransform()
 
-        # 9. Differentiable Bivariate Hill Surface Solver
+        # 7. Differentiable Bivariate Hill Surface Solver
         self.bivariate_solver = BivariateHillSolver()
 
     def _encode_and_condition_unpadded_fragments(
@@ -295,37 +285,24 @@ class CancerComboBRICSSymmetric(nn.Module):
             mask_B=mask_B
         )
 
-        # STAGE 5: Symmetric A/B Fusion
-        # Pair corresponding statistics across directions and fuse with symmetric mean and abs diff
-        # Output r_AB_sym: (B, 4d)
-        r_AB_sym = self.symmetric_fusion(
-            mu_A_from_B=mu_A_from_B,
-            p_A_from_B=p_A_from_B,
-            mu_B_from_A=mu_B_from_A,
-            p_B_from_A=p_B_from_A
-        )
-        assert r_AB_sym.shape == (B, 4 * self.d_dim), f"Stage 5 r_AB_sym shape mismatch: got {tuple(r_AB_sym.shape)}"
+        # STAGE 5: Direct Concatenation of Directional Features (r_AB in R^512)
+        # Directly concatenate the 4 directional cross-attention representations:
+        # [mu_A_from_B, p_A_from_B, mu_B_from_A, p_B_from_A]
+        r_AB = torch.cat([mu_A_from_B, p_A_from_B, mu_B_from_A, p_B_from_A], dim=-1)
+        assert r_AB.shape == (B, 4 * self.d_dim), f"Stage 5 r_AB shape mismatch: got {tuple(r_AB.shape)}"
 
-        # STAGE 6: Cell Fusion
-        # Concatenate fused drug representation r_AB_sym with cell representation c
-        # Output r_final: (B, 4d + 512)
-        r_final = self.cell_fusion(r_AB_sym=r_AB_sym, c=c)
+        # STAGE 6: Cell Feature Concatenation (r_final in R^1024)
+        # Concatenate r_AB (512-dim) with cell line representation c (512-dim)
+        r_final = torch.cat([r_AB, c], dim=-1)
         expected_r_final_dim = 4 * self.d_dim + self.cell_dim
         assert r_final.shape == (B, expected_r_final_dim), f"Stage 6 r_final shape mismatch: got {tuple(r_final.shape)}"
 
-        # STAGE 7: Parameter Heads with Shared Single-Drug Trunk
-        # Predicts raw parameter logits from r_final and directional features
-        raw_params = self.parameter_heads(
-            r_final=r_final,
-            mu_A_from_B=mu_A_from_B,
-            p_A_from_B=p_A_from_B,
-            mu_B_from_A=mu_B_from_A,
-            p_B_from_A=p_B_from_A,
-            c=c
-        )
+        # STAGE 7: ONE Unified Parameter MLP (1024 -> 512 -> 256 -> 9)
+        # Predicts all 9 raw parameter logits directly from r_final
+        raw_params = self.parameter_heads(r_final)
 
         # STAGE 8: Constraint / Transform Stage
-        # Applies Softplus (positivity) and Sigmoid (range [0, 1]) constraints
+        # Applies Softplus (positivity), Sigmoid (range [0, 1]), and Log-Space EC50 constraints
         params = self.constraint_transform(raw_params)
 
         # STAGE 9: Differentiable Bivariate Hill Surface Solver

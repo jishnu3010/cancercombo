@@ -3,10 +3,9 @@ Model Validation Command Line Diagnostic Script for CancerCombo.
 
 Tests:
     1. Forward pass execution on CPU and GPU (if available).
-    2. Autograd backward pass and finite gradients check.
-    3. Permutation symmetry verification |Y(A,B) - Y(B,A)^T| < 1e-5.
-    4. Arbitrary M x N surface grid support (3x3, 4x4, 5x5, 8x8).
-    5. Masking correctness for variable BRICS fragment counts.
+    2. Autograd backward pass and finite gradients check across unified parameter MLP.
+    3. Arbitrary M x N surface grid support (3x3, 4x4, 5x5, 8x8).
+    4. Directional cross-attention & unpadded fragment conditioning flow.
 """
 
 import sys
@@ -56,8 +55,8 @@ def main():
     for shape in [(3, 3), (4, 4), (5, 5), (8, 8)]:
         test_grid_shape(model, device, grid_shape=shape)
 
-    # 2. Test Permutation Symmetry
-    print("\n[2] Testing Drug Permutation Symmetry Y(A,B) == Y(B,A)^T:")
+    # 2. Test Directional Cross-Attention Forward Execution
+    print("\n[2] Testing Directional Cross-Attention & Unified Parameter MLP:")
     B = 2
     cell_expr = torch.randn(B, 976, device=device)
     fp_A = torch.randn(B, 3, 2048, device=device)
@@ -69,16 +68,11 @@ def main():
 
     model.eval()
     with torch.no_grad():
-        Y_AB = model(cell_expr, fp_A, mask_A, fp_B, mask_B, dose_grid=(doses_A, doses_B))
-        Y_BA = model(cell_expr, fp_B, mask_B, fp_A, mask_A, dose_grid=(doses_B, doses_A))
+        Y_AB, params_AB = model(cell_expr, fp_A, mask_A, fp_B, mask_B, dose_grid=(doses_A, doses_B), return_params=True)
 
-    max_diff = torch.abs(Y_AB - Y_BA.transpose(1, 2)).max().item()
-    print(f"  Max Absolute Difference |Y(A,B) - Y(B,A)^T|: {max_diff:.8e}")
-    if max_diff < 1e-5:
-        print("  [PASS] Mathematical Drug-Order Invariance Verified!")
-    else:
-        print("  [FAIL] Drug Permutation Symmetry Violation!")
-        sys.exit(1)
+    assert Y_AB.shape == (B, 4, 4), f"Surface shape mismatch: expected ({B}, 4, 4), got {tuple(Y_AB.shape)}"
+    assert set(params_AB.keys()) == {"e0", "e1", "e2", "e12", "c1", "c2", "h1", "h2", "alpha", "log_c1", "log_c2"}
+    print("  [PASS] Directional Cross-Attention & Unified Parameter MLP Output Verified!")
 
     # 3. Test Backward Pass & Gradient Flow
     print("\n[3] Testing Autograd Backward Pass & Finite Gradients:")

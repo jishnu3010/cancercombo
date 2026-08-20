@@ -18,8 +18,6 @@ from cancer_combo_brics import (
     FiLMConditioning,
     ManualMultiHeadCrossAttention,
     MaskedBidirectionalCrossAttention,
-    SymmetricFusion,
-    CellFusion,
     ParameterHeads,
     ConstraintTransform,
     BivariateHillSolver,
@@ -102,32 +100,24 @@ class TestCancerComboBRICSSymmetric(unittest.TestCase):
         self.assertEqual(mu_B_from_A.shape, (self.batch_size, self.d_dim))
         self.assertEqual(p_B_from_A.shape, (self.batch_size, self.d_dim))
 
-    def test_symmetric_fusion(self):
-        """Test SymmetricFusion order-invariance property."""
-        fusion = SymmetricFusion(d_dim=self.d_dim)
+    def test_direct_concatenation_r_final(self):
+        """Test direct concatenation of directional cross-attention features into r_AB (512) and r_final (1024)."""
         mu_A = torch.randn(self.batch_size, self.d_dim)
         p_A = torch.randn(self.batch_size, self.d_dim)
         mu_B = torch.randn(self.batch_size, self.d_dim)
         p_B = torch.randn(self.batch_size, self.d_dim)
-
-        r_AB_sym = fusion(mu_A, p_A, mu_B, p_B)
-        r_BA_sym = fusion(mu_B, p_B, mu_A, p_A)
-
-        self.assertEqual(r_AB_sym.shape, (self.batch_size, 4 * self.d_dim))
-        self.assertTrue(torch.allclose(r_AB_sym, r_BA_sym, atol=1e-6))
-
-    def test_cell_fusion(self):
-        """Test CellFusion module concatenation."""
-        fusion = CellFusion(d_dim=self.d_dim, cell_dim=self.cell_dim)
-        r_AB = torch.randn(self.batch_size, 4 * self.d_dim)
         c = torch.randn(self.batch_size, self.cell_dim)
-        r_final = fusion(r_AB, c)
+
+        r_AB = torch.cat([mu_A, p_A, mu_B, p_B], dim=-1)
+        r_final = torch.cat([r_AB, c], dim=-1)
+
+        self.assertEqual(r_AB.shape, (self.batch_size, 4 * self.d_dim))
         self.assertEqual(r_final.shape, (self.batch_size, 4 * self.d_dim + self.cell_dim))
 
     def test_parameter_heads_and_constraint_transform(self):
         """Test ParameterHeads raw logits and ConstraintTransform positivity/range bounds."""
         in_dim = 4 * self.d_dim + self.cell_dim
-        heads = ParameterHeads(in_dim=in_dim, hidden_dim=256)
+        heads = ParameterHeads(in_dim=in_dim, hidden_dim=512)
         transform = ConstraintTransform()
 
         r_final = torch.randn(self.batch_size, in_dim)
@@ -178,11 +168,9 @@ class TestCancerComboBRICSSymmetric(unittest.TestCase):
         self.assertIsNotNone(params["c1"].grad)
         self.assertIsNotNone(params["alpha"].grad)
 
-    def test_drug_order_invariance(self):
+    def test_directional_cross_attention_forward(self):
         """
-        CRITICAL TEST: Confirm drug-order invariance of CancerComboBRICSSymmetric.
-        Verifies that swapping Drug A and Drug B inputs yields matching outputs up to dose grid transpose:
-            CancerCombo(A, B, cell) == CancerCombo(B, A, cell).transpose(1, 2)
+        Verify forward execution and tensor shapes of CancerComboBRICSSymmetric with directional cross-attention and unified parameter MLP.
         """
         model = CancerComboBRICSSymmetric(
             gene_dim=self.gene_dim,
@@ -229,22 +217,11 @@ class TestCancerComboBRICSSymmetric(unittest.TestCase):
             return_params=True
         )
 
-        # Verify predicted surface Y_AB is equal to transposed Y_BA
+        # Verify predicted surfaces are non-null, finite, and match grid dimensions
         self.assertEqual(Y_AB.shape, (self.batch_size, self.n_doses_a, self.n_doses_b))
         self.assertEqual(Y_BA.shape, (self.batch_size, self.n_doses_b, self.n_doses_a))
-
-        Y_BA_transposed = Y_BA.transpose(1, 2)
-        diff = torch.abs(Y_AB - Y_BA_transposed).max().item()
-        self.assertLess(diff, 1e-5, f"Drug-order invariance violated! Max diff: {diff}")
-
-        # Verify individual parameter symmetry:
-        # e0, e12, alpha should be identical
-        # c1 and c2, h1 and h2, e1 and e2 should swap correspondingly
-        self.assertTrue(torch.allclose(params_AB["e0"], params_BA["e0"], atol=1e-5))
-        self.assertTrue(torch.allclose(params_AB["e12"], params_BA["e12"], atol=1e-5))
-        self.assertTrue(torch.allclose(params_AB["alpha"], params_BA["alpha"], atol=1e-5))
-        self.assertTrue(torch.allclose(params_AB["c1"], params_BA["c2"], atol=1e-5))
-        self.assertTrue(torch.allclose(params_AB["c2"], params_BA["c1"], atol=1e-5))
+        self.assertTrue(torch.isfinite(Y_AB).all())
+        self.assertTrue(torch.isfinite(Y_BA).all())
 
     def test_cancer_combo_dataset(self):
         """Test CancerComboDataset and collate_cancer_combo_batch DataLoader integration."""

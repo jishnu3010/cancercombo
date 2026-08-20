@@ -9,8 +9,6 @@ from .cell_line_encoder import CellLineEncoder
 from .fragment_encoder import FragmentEncoder
 from .film_conditioning import FiLMConditioning
 from .cross_attention import MaskedBidirectionalCrossAttention, BidirectionalCrossAttention, ManualMultiHeadCrossAttention
-from .symmetric_fusion import SymmetricFusion
-from .cell_fusion import CellFusion
 from .parameter_heads import ParameterHeads
 from .constraint_transform import ConstraintTransform
 from .bivariate_hill_solver import BivariateHillSolver
@@ -31,8 +29,6 @@ __all__ = [
     "MaskedBidirectionalCrossAttention",
     "BidirectionalCrossAttention",
     "ManualMultiHeadCrossAttention",
-    "SymmetricFusion",
-    "CellFusion",
     "ParameterHeads",
     "ConstraintTransform",
     "BivariateHillSolver",
