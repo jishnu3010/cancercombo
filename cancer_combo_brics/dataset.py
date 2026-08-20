@@ -19,7 +19,7 @@ from torch.utils.data import Dataset
 
 from .brics_utils import collate_brics_fragments
 from .cell_expression import CellExpressionLoader
-from .brics_cache import BRICSCache
+from .brics_cache import BRICSCache, get_global_brics_cache, set_global_brics_cache
 
 
 class CancerComboDataset(Dataset):
@@ -33,6 +33,7 @@ class CancerComboDataset(Dataset):
         dose_grids: List[Tuple[torch.Tensor, torch.Tensor]],
         viability_surfaces: List[torch.Tensor],
         cell_expr_dict: Dict[str, torch.Tensor],
+        brics_cache: Optional[BRICSCache] = None
     ):
         assert len(drug_pairs) == len(dose_grids) == len(viability_surfaces), (
             "Length mismatch among drug_pairs, dose_grids, and viability_surfaces."
@@ -41,6 +42,9 @@ class CancerComboDataset(Dataset):
         self.dose_grids = dose_grids
         self.viability_surfaces = viability_surfaces
         self.cell_expr_dict = cell_expr_dict
+        self.brics_cache = brics_cache
+        if brics_cache is not None:
+            set_global_brics_cache(brics_cache)
 
     def __len__(self) -> int:
         return len(self.drug_pairs)
@@ -70,7 +74,9 @@ class CancerComboDataset(Dataset):
 def collate_cancer_combo_batch(
     batch: List[Dict[str, Union[torch.Tensor, str]]],
     frag_fp_dim: int = 2048,
-    device: Union[torch.device, str] = "cpu"
+    device: Union[torch.device, str] = "cpu",
+    brics_cache: Optional[BRICSCache] = None,
+    use_cache: bool = True
 ) -> Dict[str, Union[torch.Tensor, List]]:
     """
     Custom collate function for CancerComboDataset.
@@ -86,8 +92,12 @@ def collate_cancer_combo_batch(
     cell_expr = torch.stack(cell_expr_list, dim=0).to(device)
 
     # Collate BRICS fragments for Drug A and Drug B into padded tensors and boolean masks
-    fp_A, mask_A, frags_A_list = collate_brics_fragments(smiles_A_list, n_bits=frag_fp_dim, device=device)
-    fp_B, mask_B, frags_B_list = collate_brics_fragments(smiles_B_list, n_bits=frag_fp_dim, device=device)
+    fp_A, mask_A, frags_A_list = collate_brics_fragments(
+        smiles_A_list, n_bits=frag_fp_dim, device=device, brics_cache=brics_cache, use_cache=use_cache
+    )
+    fp_B, mask_B, frags_B_list = collate_brics_fragments(
+        smiles_B_list, n_bits=frag_fp_dim, device=device, brics_cache=brics_cache, use_cache=use_cache
+    )
 
     doses_A = torch.stack(doses_A_list, dim=0).to(device)
     doses_B = torch.stack(doses_B_list, dim=0).to(device)
@@ -115,18 +125,30 @@ def load_cancer_combo_from_csv(
     max_samples: Optional[int] = None,
     gene_dim: int = 976,
     brics_cache: Optional[BRICSCache] = None,
+<<<<<<< HEAD
     expr_loader: Optional[CellExpressionLoader] = None,
     fit_normalization: bool = False
+=======
+    use_brics_cache: bool = True
+>>>>>>> 100ee04 (Integrate BRICSCache into active DataLoader pipeline)
 ) -> CancerComboDataset:
     """
     Loads dataset directly from combination dataset CSV files.
 
+<<<<<<< HEAD
     Enforces Leakage-Safe Normalization Protocol:
         - If expr_loader is not provided, creates a new CellExpressionLoader.
         - If fit_normalization is True (or expr_loader is not yet fitted and split == 1),
           fits normalization statistics (mean/std) strictly on training set cell lines.
         - If expr_loader is already fitted, reuses training mean/std unchanged without refitting.
         - Fails loudly if any required cell line is missing from expr_loader.
+=======
+    Strict validation:
+        - Loads real cell line 976-gene expression vectors via CellExpressionLoader.
+        - Fails loudly if any cell line is missing (NO silent synthetic random fallbacks).
+        - Audits target viability range and explicitly clips targets to [0, 1].
+        - Precomputes and caches BRICS features for unique dataset SMILES if use_brics_cache=True.
+>>>>>>> 100ee04 (Integrate BRICSCache into active DataLoader pipeline)
     """
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"Combination dataset CSV not found at '{csv_path}'.")
@@ -250,11 +272,24 @@ def load_cancer_combo_from_csv(
         pct_outside = (outside_01_count / total_elements) * 100.0
         print(f"  Target Range Audit: Raw Min={raw_min:.4f}, Raw Max={raw_max:.4f} | {pct_outside:.2f}% values outside [0, 1] (clipped to [0, 1]).")
 
+    # 4. Optional Precomputation of BRICS Cache
+    if use_brics_cache:
+        if brics_cache is None:
+            brics_cache = get_global_brics_cache()
+        else:
+            set_global_brics_cache(brics_cache)
+        unique_smiles: Set[str] = set()
+        for _, smi_a, smi_b in drug_pairs:
+            unique_smiles.add(smi_a)
+            unique_smiles.add(smi_b)
+        brics_cache.precompute_dataset_drugs(list(unique_smiles))
+
     dataset = CancerComboDataset(
         drug_pairs=drug_pairs,
         dose_grids=dose_grids,
         viability_surfaces=viability_surfaces,
-        cell_expr_dict=cell_expr_dict
+        cell_expr_dict=cell_expr_dict,
+        brics_cache=brics_cache
     )
     dataset.expr_loader = expr_loader
     return dataset
@@ -267,14 +302,17 @@ def load_cancer_combo_splits(
     val_split: int = 2,
     test_split: int = 3,
     max_samples: Optional[int] = None,
-    gene_dim: int = 976
+    gene_dim: int = 976,
+    brics_cache: Optional[BRICSCache] = None,
+    use_brics_cache: bool = True
 ) -> Tuple[CancerComboDataset, CancerComboDataset, CancerComboDataset, CellExpressionLoader]:
     """
-    Loads Train, Val, and Test dataset splits with LEAKAGE-SAFE cell expression normalization:
-        1. Fit normalization mean and std ONCE using training-split cell lines ONLY.
-        2. Reuse the exact same fitted training normalizer for validation and test splits without refitting.
+    Loads Train, Val, and Test dataset splits with LEAKAGE-SAFE cell expression normalization
+    and precomputed BRICSCache.
     """
     expr_loader = CellExpressionLoader(csv_path=cell_expr_csv, gene_dim=gene_dim)
+    if use_brics_cache and brics_cache is None:
+        brics_cache = get_global_brics_cache()
 
     # 1. Load Train Split (Fits expr_loader ONCE on training cell lines)
     train_dataset = load_cancer_combo_from_csv(
@@ -284,7 +322,9 @@ def load_cancer_combo_splits(
         max_samples=max_samples,
         gene_dim=gene_dim,
         expr_loader=expr_loader,
-        fit_normalization=True
+        fit_normalization=True,
+        brics_cache=brics_cache,
+        use_brics_cache=use_brics_cache
     )
 
     # 2. Load Val Split (Reuses fitted training expr_loader WITHOUT refitting)
@@ -295,7 +335,9 @@ def load_cancer_combo_splits(
         max_samples=max_samples,
         gene_dim=gene_dim,
         expr_loader=expr_loader,
-        fit_normalization=False
+        fit_normalization=False,
+        brics_cache=brics_cache,
+        use_brics_cache=use_brics_cache
     )
 
     # 3. Load Test Split (Reuses fitted training expr_loader WITHOUT refitting)
@@ -306,7 +348,9 @@ def load_cancer_combo_splits(
         max_samples=max_samples,
         gene_dim=gene_dim,
         expr_loader=expr_loader,
-        fit_normalization=False
+        fit_normalization=False,
+        brics_cache=brics_cache,
+        use_brics_cache=use_brics_cache
     )
 
     return train_dataset, val_dataset, test_dataset, expr_loader

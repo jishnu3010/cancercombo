@@ -29,6 +29,7 @@ from cancer_combo_brics import (
     load_cancer_combo_splits,
     collate_cancer_combo_batch
 )
+from cancer_combo_brics.brics_cache import get_global_brics_cache
 
 
 def move_batch_to_device(batch: dict, device: torch.device) -> dict:
@@ -188,6 +189,7 @@ def main():
     parser.add_argument("--num_workers", type=int, default=config.NUM_WORKERS, help="DataLoader num_workers")
     parser.add_argument("--checkpoint_dir", type=str, default=config.CHECKPOINT_DIR, help="Directory to save model checkpoints")
     parser.add_argument("--max_samples", type=int, default=config.MAX_SAMPLES, help="Max samples limit (optional)")
+    parser.add_argument("--use_brics_cache", action="store_true", default=config.USE_BRICS_CACHE, help="Enable BRICSCache for fast precomputed SMILES lookups")
     parser.add_argument("--debug_print_fragments", action="store_true", help="Toggle debug printing of raw F_A and F_B fragment embeddings during training")
     parser.add_argument("--print_every", type=int, default=100, help="Print debug fragment stats every N steps (default: 100)")
 
@@ -207,17 +209,24 @@ def main():
     # 1. Load TRAIN, VAL, and TEST Datasets (Leakage-Safe Normalization fit on Train ONLY)
     print(f"\n[1] Loading dataset splits from '{args.data_csv}'...")
     start_time = time.time()
+    brics_cache = get_global_brics_cache() if args.use_brics_cache else None
+
     train_dataset, val_dataset, test_dataset, expr_loader = load_cancer_combo_splits(
         data_csv=args.data_csv,
         train_split=config.TRAIN_SPLIT,
         val_split=config.VAL_SPLIT,
         test_split=config.TEST_SPLIT,
-        max_samples=args.max_samples
+        max_samples=args.max_samples,
+        brics_cache=brics_cache,
+        use_brics_cache=args.use_brics_cache
     )
 
     print(f"    - Train dataset loaded: {len(train_dataset)} samples")
     print(f"    - Val dataset loaded:   {len(val_dataset)} samples")
     print(f"    - Test dataset loaded:  {len(test_dataset)} samples ({time.time() - start_time:.2f}s)")
+
+    if brics_cache:
+        brics_cache.print_stats()
 
     train_loader = DataLoader(
         train_dataset,
@@ -259,7 +268,7 @@ def main():
 
     scaler = torch.amp.GradScaler('cuda', enabled=device.type == "cuda" and config.USE_AMP)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=config.WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.01, total_iters=args.epochs)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     criterion = nn.MSELoss()
 
     # 3. Training Loop with Validation Integrity
@@ -324,6 +333,9 @@ def main():
     print(f"Test Pearson  : {test_metrics['pearson']:.4f}")
     print(f"Test Spearman : {test_metrics['spearman']:.4f}")
     print("=" * 75)
+
+    if brics_cache:
+        brics_cache.print_stats()
 
 
 if __name__ == "__main__":

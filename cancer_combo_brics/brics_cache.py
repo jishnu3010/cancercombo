@@ -14,6 +14,7 @@ Cache Data Structure:
 
 import os
 import json
+import threading
 from typing import Dict, List, Tuple, Optional
 import numpy as np
 from rdkit import Chem
@@ -25,9 +26,14 @@ from .brics_utils import decompose_smiles_to_brics, fragment_to_morgan_fp
 class BRICSCache:
     """
     In-memory and persistent disk cache for BRICS fragment decomposition and Morgan fingerprints.
+    Tracks lookup statistics and provides thread-safe access across batch loading.
     """
 
-    def __init__(self, cache_file: Optional[str] = os.path.join("data", "brics_cache.json"), n_bits: int = 2048):
+    def __init__(
+        self,
+        cache_file: Optional[str] = os.path.join("data", "brics_cache.json"),
+        n_bits: int = 2048
+    ):
         self.cache_file = cache_file
         self.n_bits = n_bits
 
@@ -35,8 +41,31 @@ class BRICSCache:
         self.smiles_to_frags: Dict[str, List[str]] = {}
         self.smiles_to_fps: Dict[str, np.ndarray] = {}
 
+        # Thread safety lock
+        self._lock = threading.Lock()
+
+        # Cache statistics instrumentation
+        self.requests = 0
+        self.hits = 0
+        self.misses = 0
+
         if cache_file and os.path.exists(cache_file):
             self.load_cache(cache_file)
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_lock"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._lock = threading.Lock()
+
+    @property
+    def lock(self) -> threading.Lock:
+        if not hasattr(self, "_lock") or self._lock is None:
+            self._lock = threading.Lock()
+        return self._lock
 
     def canonicalize_smiles(self, smiles: str) -> str:
         if not smiles or not isinstance(smiles, str) or smiles.lower() in ("nan", "none", "null"):
@@ -51,23 +80,48 @@ class BRICSCache:
         Retrieves cached BRICS fragments and Morgan fingerprints for a SMILES string,
         or computes and caches them on first occurrence.
         """
+        with self.lock:
+            self.requests += 1
+
+            # Fast path 1: Direct exact SMILES match in cache
+            if smiles in self.smiles_to_frags:
+                self.hits += 1
+                return self.smiles_to_frags[smiles], self.smiles_to_fps[smiles]
+
+        # Canonicalize SMILES
         can_smi = self.canonicalize_smiles(smiles)
 
-        if can_smi in self.smiles_to_frags:
-            return self.smiles_to_frags[can_smi], self.smiles_to_fps[can_smi]
+        with self.lock:
+            # Fast path 2: Canonical SMILES match in cache
+            if can_smi in self.smiles_to_frags:
+                frags = self.smiles_to_frags[can_smi]
+                fps = self.smiles_to_fps[can_smi]
+                # Alias raw SMILES to canonical entry for future fast path 1 hits
+                self.smiles_to_frags[smiles] = frags
+                self.smiles_to_fps[smiles] = fps
+                self.hits += 1
+                return frags, fps
 
-        # Compute BRICS decomposition and Morgan fingerprints
+            self.misses += 1
+
+        # Compute BRICS decomposition and Morgan fingerprints (uncached miss)
         frags = decompose_smiles_to_brics(can_smi)
         fps_list = []
         for f in frags:
             fp_arr = fragment_to_morgan_fp(f, n_bits=self.n_bits)
             fps_list.append(fp_arr)
 
-        fps_matrix = np.array(fps_list, dtype=np.float32)
+        if fps_list:
+            fps_matrix = np.array(fps_list, dtype=np.float32)
+        else:
+            fps_matrix = np.zeros((0, self.n_bits), dtype=np.float32)
 
-        # Store in cache
-        self.smiles_to_frags[can_smi] = frags
-        self.smiles_to_fps[can_smi] = fps_matrix
+        # Store in cache under both canonical and raw SMILES
+        with self.lock:
+            self.smiles_to_frags[can_smi] = frags
+            self.smiles_to_fps[can_smi] = fps_matrix
+            self.smiles_to_frags[smiles] = frags
+            self.smiles_to_fps[smiles] = fps_matrix
 
         return frags, fps_matrix
 
@@ -85,23 +139,87 @@ class BRICSCache:
         if self.cache_file:
             self.save_cache(self.cache_file)
 
-    def save_cache(self, file_path: str):
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        serializable_data = {}
-        for smi, frags in self.smiles_to_frags.items():
-            fps_matrix = self.smiles_to_fps[smi]
-            serializable_data[smi] = {
-                "brics_fragments": frags,
-                "fingerprints": fps_matrix.tolist()
+    def get_stats(self) -> Dict[str, float]:
+        """Returns dictionary of cache usage statistics."""
+        with self.lock:
+            unique_drugs = len(set(id(v) for v in self.smiles_to_frags.values()))
+            hit_rate = (self.hits / self.requests * 100.0) if self.requests > 0 else 0.0
+            return {
+                "unique_drugs": unique_drugs,
+                "requests": self.requests,
+                "hits": self.hits,
+                "misses": self.misses,
+                "hit_rate": hit_rate
             }
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(serializable_data, f)
-        print(f"Saved BRICSCache to '{file_path}'.")
 
-    def load_cache(self, file_path: str):
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        for smi, content in data.items():
-            self.smiles_to_frags[smi] = content["brics_fragments"]
-            self.smiles_to_fps[smi] = np.array(content["fingerprints"], dtype=np.float32)
-        print(f"Loaded {len(self.smiles_to_frags)} cached drug entries from '{file_path}'.")
+    def print_stats(self):
+        """Prints a human-readable summary of BRICSCache performance statistics."""
+        stats = self.get_stats()
+        print("\n" + "=" * 45)
+        print("         BRICS Cache Statistics")
+        print("=" * 45)
+        print(f"Unique drugs in cache: {stats['unique_drugs']}")
+        print(f"Total lookup requests: {stats['requests']}")
+        print(f"Cache hits           : {stats['hits']}")
+        print(f"Cache misses         : {stats['misses']}")
+        print(f"Cache hit rate       : {stats['hit_rate']:.2f}%")
+        print("=" * 45 + "\n")
+
+    def reset_stats(self):
+        """Resets request/hit/miss counters to zero."""
+        with self.lock:
+            self.requests = 0
+            self.hits = 0
+            self.misses = 0
+
+    def save_cache(self, file_path: str):
+        with self.lock:
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            serializable_data = {}
+            for smi, frags in self.smiles_to_frags.items():
+                fps_matrix = self.smiles_to_fps[smi]
+                serializable_data[smi] = {
+                    "brics_fragments": frags,
+                    "fingerprints": fps_matrix.tolist()
+                }
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(serializable_data, f)
+            print(f"Saved BRICSCache to '{file_path}'.")
+
+    def load_cache(self, file_path: str, verbose: bool = False):
+        with self.lock:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for smi, content in data.items():
+                self.smiles_to_frags[smi] = content["brics_fragments"]
+                self.smiles_to_fps[smi] = np.array(content["fingerprints"], dtype=np.float32)
+            if verbose:
+                print(f"Loaded {len(self.smiles_to_frags)} cached drug entries from '{file_path}'.")
+
+
+# Global singleton cache instance
+_GLOBAL_BRICS_CACHE: Optional[BRICSCache] = None
+
+
+def get_global_brics_cache(
+    cache_file: Optional[str] = os.path.join("data", "brics_cache.json"),
+    n_bits: int = 2048
+) -> BRICSCache:
+    """Returns or initializes global BRICSCache singleton instance."""
+    global _GLOBAL_BRICS_CACHE
+    if _GLOBAL_BRICS_CACHE is None:
+        _GLOBAL_BRICS_CACHE = BRICSCache(cache_file=cache_file, n_bits=n_bits)
+    return _GLOBAL_BRICS_CACHE
+
+
+def set_global_brics_cache(cache: BRICSCache):
+    """Sets global BRICSCache singleton instance."""
+    global _GLOBAL_BRICS_CACHE
+    _GLOBAL_BRICS_CACHE = cache
+
+
+def reset_global_brics_cache():
+    """Resets global BRICSCache singleton instance."""
+    global _GLOBAL_BRICS_CACHE
+    _GLOBAL_BRICS_CACHE = None
+

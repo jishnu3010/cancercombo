@@ -11,6 +11,7 @@ Predicts complete 2D dose-response viability surface Y (M x N).
 Uses exact same cell expression, BRICS preprocessing, and model transformations as training.
 """
 
+from typing import List
 import os
 import sys
 import json

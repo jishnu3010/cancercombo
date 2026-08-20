@@ -6,7 +6,7 @@ converts fragments to Morgan Fingerprints (ECFP4), and handles batch collation
 with padding and boolean attention masks.
 """
 
-from typing import List, Tuple, Union, Optional
+from typing import List, Tuple, Union, Optional, Any
 import torch
 import numpy as np
 
@@ -138,26 +138,64 @@ def collate_brics_fragments(
     smiles_list: List[str],
     n_bits: int = 2048,
     radius: int = 2,
-    device: Union[torch.device, str] = "cpu"
+    device: Union[torch.device, str] = "cpu",
+    brics_cache: Optional[Any] = None,
+    use_cache: bool = True
 ) -> Tuple[torch.Tensor, torch.Tensor, List[List[str]]]:
     """
     Collates a list of molecule SMILES into a padded tensor of fragment fingerprints
     and a corresponding boolean padding mask.
+
+    Uses BRICSCache if available/enabled to eliminate redundant RDKit BRICS decomposition
+    and Morgan FP computation.
 
     Args:
         smiles_list: List of B SMILES strings.
         n_bits: Morgan FP dimension (2048).
         radius: Fingerprint radius (2).
         device: PyTorch device.
+        brics_cache: Optional BRICSCache instance.
+        use_cache: If True, attempts cache lookup before fallback computation.
 
     Returns:
         fp_tensor: Padded tensor of shape (B, n_max, n_bits).
         mask_tensor: Boolean mask tensor of shape (B, n_max) where True indicates real fragment, False indicates padding.
         all_fragments: List of fragment lists for each molecule in batch.
     """
+    if use_cache and brics_cache is None:
+        try:
+            from .brics_cache import get_global_brics_cache
+            brics_cache = get_global_brics_cache(n_bits=n_bits)
+        except Exception:
+            brics_cache = None
+
     all_fragments: List[List[str]] = []
+    fps_matrices: List[np.ndarray] = []
     max_len = 0
 
+    if use_cache and brics_cache is not None:
+        for smiles in smiles_list:
+            frags, fp_mat = brics_cache.get_or_compute_brics(smiles)
+            all_fragments.append(frags)
+            fps_matrices.append(fp_mat)
+            if len(frags) > max_len:
+                max_len = len(frags)
+
+        max_len = max(max_len, 1)
+        batch_size = len(smiles_list)
+
+        fp_tensor = torch.zeros(batch_size, max_len, n_bits, dtype=torch.float32)
+        mask_tensor = torch.zeros(batch_size, max_len, dtype=torch.bool)
+
+        for i, (frags, fp_mat) in enumerate(zip(all_fragments, fps_matrices)):
+            n_frags = len(frags)
+            if n_frags > 0 and fp_mat.shape[0] > 0:
+                fp_tensor[i, :n_frags] = torch.from_numpy(fp_mat[:n_frags])
+                mask_tensor[i, :n_frags] = True
+
+        return fp_tensor.to(device), mask_tensor.to(device), all_fragments
+
+    # Uncached fallback path
     for smiles in smiles_list:
         frags = decompose_smiles_to_brics(smiles)
         all_fragments.append(frags)

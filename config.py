@@ -28,6 +28,8 @@ _defaults = {
         "val_split": 2,
         "test_split": 3,
         "max_samples": None,
+        "use_brics_cache": True,
+        "brics_cache_file": "data/brics_cache.json",
     },
     "model": {
         "gene_dim": 976,
@@ -85,6 +87,8 @@ TRAIN_SPLIT = int(_cfg["dataset"]["train_split"])
 VAL_SPLIT = int(_cfg["dataset"]["val_split"])
 TEST_SPLIT = int(_cfg["dataset"]["test_split"])
 MAX_SAMPLES = _cfg["dataset"]["max_samples"]
+USE_BRICS_CACHE = bool(_cfg["dataset"]["use_brics_cache"])
+BRICS_CACHE_FILE = str(_cfg["dataset"]["brics_cache_file"])
 
 # ==============================================================================
 # MODEL ARCHITECTURE HYPERPARAMETERS

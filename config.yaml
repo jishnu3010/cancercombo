@@ -7,6 +7,8 @@ dataset:
   val_split: 2
   test_split: 3
   max_samples: null
+  use_brics_cache: true
+  brics_cache_file: "data/brics_cache.json"
 
 model:
   gene_dim: 976
