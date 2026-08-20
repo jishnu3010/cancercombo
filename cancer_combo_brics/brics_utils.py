@@ -54,6 +54,7 @@ def decompose_smiles_to_brics(smiles: str) -> List[str]:
         return fragments
     except Exception as e:
         # Fallback to full SMILES if BRICS decomposition fails but mol is valid
+        print(f"Warning: BRICS decomposition failed for '{smiles}': {e}")
         return [smiles]
 
 
