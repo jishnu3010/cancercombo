@@ -125,30 +125,20 @@ def load_cancer_combo_from_csv(
     max_samples: Optional[int] = None,
     gene_dim: int = 976,
     brics_cache: Optional[BRICSCache] = None,
-<<<<<<< HEAD
     expr_loader: Optional[CellExpressionLoader] = None,
-    fit_normalization: bool = False
-=======
+    fit_normalization: bool = False,
     use_brics_cache: bool = True
->>>>>>> 100ee04 (Integrate BRICSCache into active DataLoader pipeline)
 ) -> CancerComboDataset:
     """
     Loads dataset directly from combination dataset CSV files.
 
-<<<<<<< HEAD
-    Enforces Leakage-Safe Normalization Protocol:
+    Enforces Leakage-Safe Normalization Protocol & BRICSCache Support:
         - If expr_loader is not provided, creates a new CellExpressionLoader.
         - If fit_normalization is True (or expr_loader is not yet fitted and split == 1),
           fits normalization statistics (mean/std) strictly on training set cell lines.
         - If expr_loader is already fitted, reuses training mean/std unchanged without refitting.
-        - Fails loudly if any required cell line is missing from expr_loader.
-=======
-    Strict validation:
-        - Loads real cell line 976-gene expression vectors via CellExpressionLoader.
-        - Fails loudly if any cell line is missing (NO silent synthetic random fallbacks).
-        - Audits target viability range and explicitly clips targets to [0, 1].
         - Precomputes and caches BRICS features for unique dataset SMILES if use_brics_cache=True.
->>>>>>> 100ee04 (Integrate BRICSCache into active DataLoader pipeline)
+        - Fails loudly if any required cell line is missing from expr_loader.
     """
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"Combination dataset CSV not found at '{csv_path}'.")

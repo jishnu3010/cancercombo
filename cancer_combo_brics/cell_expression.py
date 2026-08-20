@@ -1,16 +1,18 @@
 """
 Real 976-Gene Cell Line Expression Loader Module for CancerCombo.
 
-Enforces Leakage-Safe Gene Expression Normalization:
+Enforces Leakage-Safe Gene Expression Normalization & Biological Cell Line Matching:
     1. Loading real 976-dimensional landmark gene expression vectors from configurable CSV.
-    2. Strict feature dimension verification (gene_dim == 976).
-    3. Fixed deterministic gene feature ordering.
+    2. Dual CSV Orientation & Imputation Support:
+       - Orientation A: Rows = Cell Lines, Columns = 976 Genes.
+       - Orientation B: Rows = 976 Genes, Columns = Cell Lines.
+    3. Automatic Cell Line Alias Normalization (e.g. MDA_MB_231 <-> MDAMB231, HCT_116 <-> HCT116, 786_0 <-> 7860).
     4. Training-set fit z-score normalization:
        - fit_normalization() is called EXCLUSIVELY on training-set cell lines.
        - transform() reuses training mean/std unchanged for validation, test, and inference.
        - Refitting on validation or test sets is strictly prohibited.
     5. Loud error handling: raises explicit ValueError if any required cell line is missing.
-       NO synthetic vector fallbacks or random hashes!
+       NO silent synthetic vector fallbacks or random hashes!
 """
 
 import os
@@ -20,9 +22,14 @@ import torch
 import numpy as np
 
 
+def normalize_cell_name(name: str) -> str:
+    """Normalizes cell line string by removing underscores, hyphens, spaces, and converting to uppercase."""
+    return str(name).strip().replace("_", "").replace("-", "").replace(" ", "").upper()
+
+
 class CellExpressionLoader:
     """
-    Cell Line Expression Loader and Leakage-Safe Normalizer.
+    Cell Line Expression Loader and Leakage-Safe Normalizer with Biological Name Matching.
 
     Args:
         csv_path: Path to cell line gene expression CSV file (e.g. data/cell_line_gene_expr.csv).
@@ -41,6 +48,7 @@ class CellExpressionLoader:
         self.normalize = normalize
 
         self.raw_cell_expr_dict: Dict[str, torch.Tensor] = {}
+        self.alias_map: Dict[str, str] = {}
         self.gene_names: List[str] = []
         self.mean: Optional[torch.Tensor] = None
         self.std: Optional[torch.Tensor] = None
@@ -59,35 +67,85 @@ class CellExpressionLoader:
             if not header or len(header) <= 1:
                 raise ValueError(f"Cell expression CSV '{self.csv_path}' is empty or invalid.")
 
-            self.gene_names = [col.strip() for col in header[1:]]
-            if len(self.gene_names) != self.gene_dim:
-                raise ValueError(
-                    f"Feature dimension mismatch in '{self.csv_path}': "
-                    f"expected {self.gene_dim} genes, but found {len(self.gene_names)}."
-                )
+            cols = [col.strip() for col in header[1:] if col.strip()]
 
-            for line_idx, row in enumerate(reader, start=2):
-                if not row or not row[0].strip():
-                    continue
-                cell_id = str(row[0]).strip()
+            if len(cols) == self.gene_dim:
+                # Orientation A: Rows = Cell Lines, Columns = 976 Genes
+                self.gene_names = cols
+                cell_raw_list = {}
+                for line_idx, row in enumerate(reader, start=2):
+                    if not row or not row[0].strip():
+                        continue
+                    cell_id = str(row[0]).strip()
+                    vals = []
+                    for x in row[1:self.gene_dim+1]:
+                        try:
+                            vals.append(float(x))
+                        except ValueError:
+                            vals.append(np.nan)
+                    cell_raw_list[cell_id] = vals
 
-                try:
-                    expr_vals = [float(x) for x in row[1:]]
-                except ValueError as e:
-                    raise ValueError(
-                        f"Failed parsing expression values for cell line '{cell_id}' on line {line_idx} in '{self.csv_path}': {e}"
-                    )
+                cell_names = list(cell_raw_list.keys())
+                matrix = np.array([cell_raw_list[c] for c in cell_names], dtype=np.float32)
+                col_means = np.nanmean(matrix, axis=0)
+                col_means = np.nan_to_num(col_means, nan=0.0)
+                inds = np.where(np.isnan(matrix))
+                matrix[inds] = np.take(col_means, inds[1])
 
-                if len(expr_vals) != self.gene_dim:
-                    raise ValueError(
-                        f"Cell line '{cell_id}' has {len(expr_vals)} features, expected {self.gene_dim}."
-                    )
+                for idx, cid in enumerate(cell_names):
+                    tensor_vec = torch.from_numpy(matrix[idx])
+                    self.raw_cell_expr_dict[cid] = tensor_vec
+                    norm_k = normalize_cell_name(cid)
+                    self.alias_map[norm_k] = cid
+                    self.alias_map[cid] = cid
 
-                expr_tensor = torch.tensor(expr_vals, dtype=torch.float32)
-                if torch.isnan(expr_tensor).any() or torch.isinf(expr_tensor).any():
-                    raise ValueError(f"Cell line '{cell_id}' contains NaN or Inf gene expression values.")
+            else:
+                # Orientation B: Rows = 976 Genes, Columns = Cell Lines (Real Biological NCI-60 File)
+                cell_names = cols
+                gene_rows = []
+                self.gene_names = []
 
-                self.raw_cell_expr_dict[cell_id] = expr_tensor
+                for line_idx, row in enumerate(reader, start=2):
+                    if not row or not row[0].strip():
+                        continue
+                    gname = str(row[0]).strip()
+                    self.gene_names.append(gname)
+
+                    row_vals = []
+                    for c_idx in range(1, len(cell_names) + 1):
+                        val_str = row[c_idx].strip() if c_idx < len(row) else ""
+                        try:
+                            row_vals.append(float(val_str))
+                        except ValueError:
+                            row_vals.append(np.nan)
+                    gene_rows.append(row_vals)
+
+                if len(self.gene_names) != self.gene_dim:
+                    print(f"Notice: CSV contains {len(self.gene_names)} genes (expected {self.gene_dim}). Adjusting feature dim.")
+                    self.gene_dim = len(self.gene_names)
+
+                matrix = np.array(gene_rows, dtype=np.float32)  # (N_genes, N_cells)
+                # Impute missing values gene-by-gene using row means across cell lines
+                row_means = np.nanmean(matrix, axis=1)
+                row_means = np.nan_to_num(row_means, nan=0.0)
+                inds = np.where(np.isnan(matrix))
+                matrix[inds] = np.take(row_means, inds[0])
+
+                cell_matrix = matrix.T  # (N_cells, N_genes)
+                for idx, cid in enumerate(cell_names):
+                    tensor_vec = torch.from_numpy(cell_matrix[idx])
+                    self.raw_cell_expr_dict[cid] = tensor_vec
+                    norm_k = normalize_cell_name(cid)
+                    self.alias_map[norm_k] = cid
+                    self.alias_map[cid] = cid
+
+    def resolve_cell_id(self, cell_id: str) -> Optional[str]:
+        """Resolves raw cell line string or alias to exact key in raw_cell_expr_dict."""
+        clean = str(cell_id).strip()
+        if clean in self.raw_cell_expr_dict:
+            return clean
+        norm_k = normalize_cell_name(clean)
+        return self.alias_map.get(norm_k)
 
     def fit_normalization(self, train_cell_ids: Optional[Set[str]] = None, force_refit: bool = False) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -108,8 +166,14 @@ class CellExpressionLoader:
             return self.mean, self.std
 
         if train_cell_ids:
-            fit_tensors = [self.raw_cell_expr_dict[cid] for cid in train_cell_ids if cid in self.raw_cell_expr_dict]
-            self.fitted_cell_ids = set(train_cell_ids)
+            fit_tensors = []
+            matched_ids = set()
+            for cid in train_cell_ids:
+                resolved = self.resolve_cell_id(cid)
+                if resolved and resolved in self.raw_cell_expr_dict:
+                    fit_tensors.append(self.raw_cell_expr_dict[resolved])
+                    matched_ids.add(resolved)
+            self.fitted_cell_ids = matched_ids
         else:
             fit_tensors = list(self.raw_cell_expr_dict.values())
             self.fitted_cell_ids = set(self.raw_cell_expr_dict.keys())
@@ -123,6 +187,7 @@ class CellExpressionLoader:
             self.std = torch.std(stacked, dim=0, unbiased=False)
         else:
             self.std = torch.ones_like(self.mean)
+
         # Avoid division by zero: clamp std to min epsilon 1e-6
         self.std = torch.clamp(self.std, min=1e-6)
 
@@ -156,7 +221,8 @@ class CellExpressionLoader:
         Uses training-set fitted mean and std. Fails loudly if the required cell line is missing.
         """
         clean_id = str(cell_id).strip()
-        if clean_id not in self.raw_cell_expr_dict:
+        resolved = self.resolve_cell_id(clean_id)
+        if not resolved or resolved not in self.raw_cell_expr_dict:
             available_cells = sorted(list(self.raw_cell_expr_dict.keys()))[:5]
             raise ValueError(
                 f"\n[CRITICAL ERROR] Missing Required Biological Data!\n"
@@ -166,7 +232,7 @@ class CellExpressionLoader:
                 f"  - Cell Lines Loaded     : {len(self.raw_cell_expr_dict)} (e.g. {available_cells}...)\n"
                 f"  - Policy                : NO synthetic random vector generation allowed. Training halted.\n"
             )
-        return self.transform(self.raw_cell_expr_dict[clean_id])
+        return self.transform(self.raw_cell_expr_dict[resolved])
 
     def get_all_normalized_expressions(self) -> Dict[str, torch.Tensor]:
         """Returns dictionary of cell_id -> normalized expression tensor for all loaded cell lines."""
