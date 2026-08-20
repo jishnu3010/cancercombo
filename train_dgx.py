@@ -254,7 +254,7 @@ def main():
 
     scaler = torch.amp.GradScaler('cuda', enabled=device.type == "cuda" and config.USE_AMP)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=config.WEIGHT_DECAY)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.01, total_iters=args.epochs)
     criterion = nn.MSELoss()
 
     # 3. Training Loop with Validation Integrity
