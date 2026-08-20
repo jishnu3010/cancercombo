@@ -26,8 +26,10 @@ from cancer_combo_brics import (
     CancerComboBRICSSymmetric,
     CancerComboBRICS,
     CancerComboDataset,
+    CellExpressionLoader,
     collate_cancer_combo_batch,
-    load_cancer_combo_from_csv
+    load_cancer_combo_from_csv,
+    load_cancer_combo_splits
 )
 
 
@@ -530,6 +532,99 @@ class TestCancerComboBRICSSymmetric(unittest.TestCase):
         self.assertEqual(tuple(explicit_mask.shape), (2, 3))
         self.assertTrue(torch.equal(explicit_mask, mask_tensor))
         print("\n[PASS] Verified FragmentEncoder & FiLM process ONLY unpadded real fragments (1, 2048) and (3, 2048). Padding occurs strictly AFTER FiLM!")
+
+    def test_leakage_free_gene_expression_normalization(self):
+        """
+        Required Validation Test:
+            1. Fit normalization on training cells ONLY and record train_mean / train_std.
+            2. Verify validation dataset uses EXACT train_mean / train_std without refitting.
+            3. Verify test dataset uses EXACT train_mean / train_std without refitting.
+            4. Verify numerical equivalence for val/test normalized expressions:
+               expected_val = (X_val - train_mean) / (train_std + eps).
+        """
+    def test_leakage_free_gene_expression_normalization(self):
+        """
+        Required Validation Test:
+            1. Fit normalization on training cells ONLY and record train_mean / train_std.
+            2. Verify validation dataset uses EXACT train_mean / train_std without refitting.
+            3. Verify test dataset uses EXACT train_mean / train_std without refitting.
+            4. Verify numerical equivalence for val/test normalized expressions:
+               expected_val = (X_val - train_mean) / (train_std + eps).
+        """
+        loader = CellExpressionLoader(gene_dim=976, normalize=True)
+        # Create artificial gene expression data for 3 train cell lines, 1 val, 1 test
+        tr_cell_ids = {"CELL_TR1", "CELL_TR2", "CELL_TR3"}
+        loader.raw_cell_expr_dict = {
+            "CELL_TR1": torch.randn(976) * 2.0 + 10.0,
+            "CELL_TR2": torch.randn(976) * 3.0 + 12.0,
+            "CELL_TR3": torch.randn(976) * 1.5 + 8.0,
+            "CELL_VAL": torch.randn(976) * 5.0 + 100.0,
+            "CELL_TEST": torch.randn(976) * 1.0 - 50.0
+        }
+
+        # 1. Fit on TRAIN ONLY
+        loader.fit_normalization(train_cell_ids=tr_cell_ids)
+        train_mean_fit = loader.mean.clone()
+        train_std_fit = loader.std.clone()
+
+        self.assertTrue(loader.fitted)
+        self.assertEqual(loader.fitted_cell_ids, tr_cell_ids)
+
+        # 2. Retrieve Val & Test normalized expressions
+        val_expr = loader.get_cell_expression("CELL_VAL")
+        test_expr = loader.get_cell_expression("CELL_TEST")
+
+        # Verify loader mean and std did NOT change after val and test retrievals
+        self.assertTrue(torch.equal(loader.mean, train_mean_fit))
+        self.assertTrue(torch.equal(loader.std, train_std_fit))
+
+        # 3. Numerical Equivalence Verification
+        expected_val = (loader.raw_cell_expr_dict["CELL_VAL"] - train_mean_fit) / train_std_fit
+        expected_test = (loader.raw_cell_expr_dict["CELL_TEST"] - train_mean_fit) / train_std_fit
+
+        self.assertTrue(torch.allclose(val_expr, expected_val, atol=1e-6))
+        self.assertTrue(torch.allclose(test_expr, expected_test, atol=1e-6))
+        self.assertFalse(torch.isnan(val_expr).any())
+        self.assertFalse(torch.isnan(test_expr).any())
+
+    def test_artificial_distribution_shift_regression(self):
+        """
+        Regression Test:
+            Verify that extreme artificial distribution shifts in validation/test sets
+            (e.g., Val mean ≈ 1000, Test mean ≈ -500) do NOT alter the training normalization statistics.
+        """
+        loader = CellExpressionLoader(gene_dim=976, normalize=True)
+        raw_tr1 = torch.randn(976) * 3.0 + 10.0
+        raw_tr2 = torch.randn(976) * 4.0 + 15.0
+        raw_val = torch.randn(976) * 50.0 + 1000.0
+        raw_test = torch.randn(976) * 20.0 - 500.0
+
+        loader.raw_cell_expr_dict = {
+            "CELL_TR1": raw_tr1,
+            "CELL_TR2": raw_tr2,
+            "CELL_VAL": raw_val,
+            "CELL_TEST": raw_test
+        }
+
+        # Fit on TRAIN
+        tr_ids = {"CELL_TR1", "CELL_TR2"}
+        loader.fit_normalization(train_cell_ids=tr_ids)
+        train_mean_fit = loader.mean.clone()
+        train_std_fit = loader.std.clone()
+
+        # Mutate Val and Test raw expressions to extreme values
+        loader.raw_cell_expr_dict["CELL_VAL"] = raw_val * 100.0 + 99999.0
+        loader.raw_cell_expr_dict["CELL_TEST"] = raw_test * 50.0 - 88888.0
+
+        # Attempting to call fit_normalization without force_refit should be a no-op that preserves training stats
+        loader.fit_normalization(train_cell_ids={"CELL_VAL"})
+        self.assertTrue(torch.equal(loader.mean, train_mean_fit))
+        self.assertTrue(torch.equal(loader.std, train_std_fit))
+
+        # Re-transform val and verify it STILL uses train_mean_fit and train_std_fit
+        val_norm = loader.get_cell_expression("CELL_VAL")
+        expected_val = (loader.raw_cell_expr_dict["CELL_VAL"] - train_mean_fit) / train_std_fit
+        self.assertTrue(torch.allclose(val_norm, expected_val, atol=1e-5))
 
 
 if __name__ == "__main__":

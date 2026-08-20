@@ -78,8 +78,15 @@ def run_baselines_and_ablations():
     csv_path = config.DATA_CSV
     device = config.DEVICE
 
-    print(f"Loading Test Set from '{csv_path}' (split={config.TEST_SPLIT})...")
-    test_ds = load_cancer_combo_from_csv(csv_path, split=config.TEST_SPLIT, max_samples=500)
+    print(f"Loading Dataset Splits from '{csv_path}'...")
+    from cancer_combo_brics import load_cancer_combo_splits
+    train_ds, val_ds, test_ds, expr_loader = load_cancer_combo_splits(
+        data_csv=csv_path,
+        train_split=config.TRAIN_SPLIT,
+        val_split=config.VAL_SPLIT,
+        test_split=config.TEST_SPLIT,
+        max_samples=500
+    )
     test_loader = DataLoader(
         test_ds,
         batch_size=config.BATCH_SIZE,

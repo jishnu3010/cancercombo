@@ -13,7 +13,8 @@ from .parameter_heads import ParameterHeads
 from .constraint_transform import ConstraintTransform
 from .bivariate_hill_solver import BivariateHillSolver
 from .model import CancerComboBRICSSymmetric, CancerComboBRICS
-from .dataset import CancerComboDataset, collate_cancer_combo_batch, load_cancer_combo_from_csv
+from .cell_expression import CellExpressionLoader
+from .dataset import CancerComboDataset, collate_cancer_combo_batch, load_cancer_combo_from_csv, load_cancer_combo_splits
 from .brics_utils import (
     decompose_smiles_to_brics,
     fragment_to_morgan_fp,
@@ -35,8 +36,10 @@ __all__ = [
     "CancerComboBRICSSymmetric",
     "CancerComboBRICS",
     "CancerComboDataset",
+    "CellExpressionLoader",
     "collate_cancer_combo_batch",
     "load_cancer_combo_from_csv",
+    "load_cancer_combo_splits",
     "decompose_smiles_to_brics",
     "fragment_to_morgan_fp",
     "collate_brics_fragments",

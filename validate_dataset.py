@@ -41,11 +41,16 @@ def main():
     expr_loader = CellExpressionLoader(csv_path=cell_csv, gene_dim=config.GENE_DIM)
     expr_loader.print_summary()
 
-    # 2. Load Datasets
+    # 2. Load Datasets (Leakage-Safe Normalization fit on Train ONLY)
     print(f"\n[1] Loading dataset splits from '{csv_path}'...")
-    train_ds = load_cancer_combo_from_csv(csv_path, cell_expr_csv=cell_csv, split=config.TRAIN_SPLIT)
-    val_ds = load_cancer_combo_from_csv(csv_path, cell_expr_csv=cell_csv, split=config.VAL_SPLIT)
-    test_ds = load_cancer_combo_from_csv(csv_path, cell_expr_csv=cell_csv, split=config.TEST_SPLIT)
+    from cancer_combo_brics import load_cancer_combo_splits
+    train_ds, val_ds, test_ds, expr_loader = load_cancer_combo_splits(
+        data_csv=csv_path,
+        cell_expr_csv=cell_csv,
+        train_split=config.TRAIN_SPLIT,
+        val_split=config.VAL_SPLIT,
+        test_split=config.TEST_SPLIT
+    )
 
     def get_drugs_and_can(ds):
         raw_drugs, can_drugs = set(), set()

@@ -26,6 +26,7 @@ import config
 from cancer_combo_brics import (
     CancerComboBRICSSymmetric,
     load_cancer_combo_from_csv,
+    load_cancer_combo_splits,
     collate_cancer_combo_batch
 )
 
@@ -203,12 +204,16 @@ def main():
         print(f"GPU Model: {torch.cuda.get_device_name(0)}")
         print(f"GPU Count: {torch.cuda.device_count()}")
 
-    # 1. Load TRAIN, VAL, and TEST Datasets
+    # 1. Load TRAIN, VAL, and TEST Datasets (Leakage-Safe Normalization fit on Train ONLY)
     print(f"\n[1] Loading dataset splits from '{args.data_csv}'...")
     start_time = time.time()
-    train_dataset = load_cancer_combo_from_csv(args.data_csv, split=config.TRAIN_SPLIT, max_samples=args.max_samples)
-    val_dataset = load_cancer_combo_from_csv(args.data_csv, split=config.VAL_SPLIT, max_samples=args.max_samples)
-    test_dataset = load_cancer_combo_from_csv(args.data_csv, split=config.TEST_SPLIT, max_samples=args.max_samples)
+    train_dataset, val_dataset, test_dataset, expr_loader = load_cancer_combo_splits(
+        data_csv=args.data_csv,
+        train_split=config.TRAIN_SPLIT,
+        val_split=config.VAL_SPLIT,
+        test_split=config.TEST_SPLIT,
+        max_samples=args.max_samples
+    )
 
     print(f"    - Train dataset loaded: {len(train_dataset)} samples")
     print(f"    - Val dataset loaded:   {len(val_dataset)} samples")
