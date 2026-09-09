@@ -1,0 +1,36 @@
+{
+  "csv_path": "data\\scenario3_drug_level.csv",
+  "file_hash_sha256": "41725dc28b180960c01467e246cdf813022f09d4af8684d6d53012bd0692f424",
+  "file_size_bytes": 58059069,
+  "total_rows": 118695,
+  "split_counts": {
+    "train_samples": 95151,
+    "val_samples": 11397,
+    "test_samples": 12147
+  },
+  "drug_counts": {
+    "train_unique_drugs": 61,
+    "val_unique_drugs": 20,
+    "test_unique_drugs": 21
+  },
+  "drug_intersections": {
+    "train_val": 0,
+    "train_test": 0,
+    "val_test": 0
+  },
+  "pair_intersections": {
+    "train_val": 0,
+    "train_test": 0,
+    "val_test": 0
+  },
+  "cell_counts": {
+    "train_unique_cells": 59,
+    "val_unique_cells": 59,
+    "test_unique_cells": 59
+  },
+  "cell_intersections": {
+    "train_val": 59,
+    "train_test": 59,
+    "val_test": 59
+  }
+}

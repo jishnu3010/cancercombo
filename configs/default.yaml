@@ -1,0 +1,73 @@
+data:
+  root: "./data"
+  combination_file: null
+  cell_expression_file: null
+  fg_cache_file: "./data/fg_cache.sqlite"
+  fg_radius: 1
+  cell_preprocessor_file: "./checkpoints/cell_preprocessor.npz"
+  drug_id_col_a: "drug_a"
+  drug_id_col_b: "drug_b"
+  smiles_col_a: "smiles_a"
+  smiles_col_b: "smiles_b"
+  cell_id_col: "cell_line_name"
+  dose_col_a: "doses_a"
+  dose_col_b: "doses_b"
+  viability_col: "viability_matrix"
+  split_col: "split"
+  target_scale: "percentage_viability"
+  num_dose_a: 4
+  num_dose_b: 4
+  max_fragments: 32
+
+model:
+  cell_dim: 976
+  cell_hidden_dim: 512
+  fragment_dim: 512
+  mol2vec_native_dim: 300
+  interaction_hidden_dim: 512
+  drug_cell_mlp_hidden: 512
+  num_param_heads: 8
+  emb_size: 1024
+  param_dropout: 0.2
+  hill_e0: 100.0
+  enable_bias: true
+
+training:
+  batch_size: 32
+  epochs: 50
+  gradient_clip: 1.0
+  mixed_precision: true
+  gradient_accumulation_steps: 1
+  num_workers: 4
+  pin_memory: true
+  seed: 42
+  early_stopping_patience: 10
+  loss_type: "huber"
+  huber_delta: 0.05
+  eval_interval_epochs: 1
+  diagnostics_interval_steps: 50
+
+optimizer:
+  type: "AdamW"
+  lr_new: 0.0001
+  lr_mol2vec: 0.0001
+  weight_decay: 0.0001
+  scheduler: "cosine"
+  warmup_epochs: 3
+  min_lr: 0.000001
+
+evaluation:
+  unseen_drug_split: true
+  eval_scenarios:
+    - 1
+    - 2
+    - 3
+  save_surface_plots: true
+  max_visualizations: 20
+
+logging:
+  project_name: "CancerCombo"
+  experiment_name: "functional_group_mol2vec_dgx"
+  log_dir: "./results"
+  checkpoint_dir: "./checkpoints"
+  save_top_k: 3

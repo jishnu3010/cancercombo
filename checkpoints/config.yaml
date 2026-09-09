@@ -1,0 +1,85 @@
+data:
+  root: ./data
+  combination_file: ./data/synthetic_combinations.csv
+  cell_expression_file: ./data/synthetic_cell_expressions.npz
+  brics_cache_file: ./data/brics_cache.sqlite
+  cell_preprocessor_file: ./checkpoints/cell_preprocessor.npz
+  drug_id_col_a: drug_a
+  drug_id_col_b: drug_b
+  smiles_col_a: smiles_a
+  smiles_col_b: smiles_b
+  cell_id_col: cell_line
+  dose_col_a: doses_a
+  dose_col_b: doses_b
+  viability_col: viability_matrix
+  split_col: split
+  target_scale: normalized_viability
+  num_dose_a: 8
+  num_dose_b: 8
+  max_fragments: 32
+model:
+  cell_dim: 976
+  cell_hidden_dim: 512
+  fragment_dim: 512
+  molformer_name_or_path: ibm/MoLFormer-XL-both-10pct
+  molformer_hidden_dim: 768
+  train_molformer: false
+  unfreeze_molformer_epoch: null
+  mock_molformer: true
+  film_hidden_dim: 512
+  film_type: standard
+  attention_heads: 4
+  attention_dim: 512
+  head_dim: 128
+  attention_dropout: 0.1
+  drug_cell_mlp_hidden: 512
+  num_param_heads: 8
+  param_trunk_hidden: 512
+  param_dropout: 0.1
+  hill_e0: 1.0
+  hill_e_max: 1.2
+  hill_h_min: 0.1
+  hill_h_max: 5.0
+  hill_logc_min: -10.0
+  hill_logc_max: 10.0
+  hill_alpha_min: 0.0001
+  hill_alpha_max: 100.0
+  enable_bias: true
+  bias_hidden_dim: 128
+  bias_max_scale: 0.1
+training:
+  batch_size: 16
+  epochs: 2
+  gradient_clip: 1.0
+  mixed_precision: false
+  gradient_accumulation_steps: 1
+  num_workers: 0
+  pin_memory: false
+  seed: 42
+  early_stopping_patience: 5
+  loss_type: huber
+  huber_delta: 0.05
+  eval_interval_epochs: 1
+  diagnostics_interval_steps: 50
+optimizer:
+  type: AdamW
+  lr_new: 0.0001
+  lr_molformer: 1.0e-05
+  weight_decay: 0.0001
+  scheduler: cosine
+  warmup_epochs: 1
+  min_lr: 1.0e-06
+evaluation:
+  unseen_drug_split: true
+  eval_scenarios:
+  - 1
+  - 2
+  - 3
+  save_surface_plots: true
+  max_visualizations: 10
+logging:
+  project_name: CancerCombo-BRICS
+  experiment_name: test_verification
+  log_dir: ./results
+  checkpoint_dir: ./checkpoints
+  save_top_k: 2
