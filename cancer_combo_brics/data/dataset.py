@@ -1,4 +1,4 @@
-"""Cancer combination dataset and collation function."""
+"""Cancer combination dataset and collation function with explicit invalid/missing SMILES tracking."""
 
 from __future__ import annotations
 
@@ -11,6 +11,16 @@ from torch.utils.data import Dataset
 
 from cancer_combo_brics.chemistry.cache import FunctionalGroupCache
 from cancer_combo_brics.chemistry.fragment_utils import pad_fragment_strings
+
+
+def is_valid_smiles(val: Any) -> bool:
+    """Check whether a SMILES input is a non-empty, non-NaN valid string."""
+    if pd.isna(val) or val is None:
+        return False
+    s = str(val).strip()
+    if not s or s.lower() == "nan" or s.lower() == "none" or s.lower() == "null":
+        return False
+    return True
 
 
 def parse_dose_array(val: Any) -> np.ndarray:
@@ -97,13 +107,11 @@ class CancerComboDataset(Dataset):
         # Never divide by 100.0. Scale factor is strictly 1.0.
         self.scale_factor = 1.0
 
-        # Sanitize SMILES columns against missing / NaN values
-        self.df[self.smiles_col_a] = self.df[self.smiles_col_a].fillna("C").astype(str).str.strip()
-        self.df[self.smiles_col_b] = self.df[self.smiles_col_b].fillna("C").astype(str).str.strip()
-
-        # Preload functional group extractions for unique SMILES
-        all_smiles = list(self.df[self.smiles_col_a].unique()) + list(self.df[self.smiles_col_b].unique())
-        self.fg_cache.preload_dataset_smiles(all_smiles)
+        # Preload functional group extractions for VALID unique SMILES only
+        valid_a = [str(s).strip() for s in self.df[self.smiles_col_a] if is_valid_smiles(s)]
+        valid_b = [str(s).strip() for s in self.df[self.smiles_col_b] if is_valid_smiles(s)]
+        all_valid_smiles = list(set(valid_a + valid_b))
+        self.fg_cache.preload_dataset_smiles(all_valid_smiles)
 
     def __len__(self) -> int:
         return len(self.df)
@@ -111,15 +119,24 @@ class CancerComboDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, Any]:
         row = self.df.iloc[idx]
 
-        # 1. SMILES & functional group fragment extraction
+        # 1. Check SMILES validity
         raw_a = row[self.smiles_col_a]
         raw_b = row[self.smiles_col_b]
-        smiles_a = str(raw_a).strip() if pd.notna(raw_a) and str(raw_a).strip() and str(raw_a).strip().lower() != "nan" else "C"
-        smiles_b = str(raw_b).strip() if pd.notna(raw_b) and str(raw_b).strip() and str(raw_b).strip().lower() != "nan" else "C"
 
-        frags_a = self.fg_cache.get_or_decompose(smiles_a)
-        frags_b = self.fg_cache.get_or_decompose(smiles_b)
+        valid_a = is_valid_smiles(raw_a)
+        valid_b = is_valid_smiles(raw_b)
+        is_valid_sample = valid_a and valid_b
 
+        if is_valid_sample:
+            smiles_a = str(raw_a).strip()
+            smiles_b = str(raw_b).strip()
+            frags_a = self.fg_cache.get_or_decompose(smiles_a)
+            frags_b = self.fg_cache.get_or_decompose(smiles_b)
+        else:
+            smiles_a = str(raw_a) if pd.notna(raw_a) else ""
+            smiles_b = str(raw_b) if pd.notna(raw_b) else ""
+            frags_a = []
+            frags_b = []
 
         # 2. Cell expression
         cell_id = str(row[self.cell_id_col])
@@ -157,6 +174,7 @@ class CancerComboDataset(Dataset):
             "drug_a": drug_a_id,
             "drug_b": drug_b_id,
             "scenario": scenario,
+            "is_valid_sample": is_valid_sample,
         }
 
 
@@ -181,7 +199,8 @@ def collate_combo_batch(batch: List[Dict[str, Any]], max_fragments: int = 32) ->
     # 4. Viability matrices
     viab_matrices = torch.from_numpy(np.stack([b["viability_matrix"] for b in batch], axis=0))
 
-    # Metadata
+    # Metadata & Validity masks
+    is_valid_samples = torch.tensor([b["is_valid_sample"] for b in batch], dtype=torch.bool)
     scenarios = torch.tensor([b["scenario"] for b in batch], dtype=torch.long)
     cell_lines = [b["cell_line"] for b in batch]
     drug_pairs = [f"{b['drug_a']} + {b['drug_b']}" for b in batch]
@@ -195,6 +214,7 @@ def collate_combo_batch(batch: List[Dict[str, Any]], max_fragments: int = 32) ->
         "doses_A": doses_a,
         "doses_B": doses_b,
         "viability_matrix": viab_matrices,
+        "is_valid_sample": is_valid_samples,
         "scenarios": scenarios,
         "cell_lines": cell_lines,
         "drug_pairs": drug_pairs,
@@ -209,4 +229,3 @@ class ComboBatchCollator:
 
     def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         return collate_combo_batch(batch, max_fragments=self.max_fragments)
-

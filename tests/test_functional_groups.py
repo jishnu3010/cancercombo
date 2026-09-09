@@ -47,8 +47,8 @@ def test_no_recognized_functional_group_fallback():
 def test_invalid_smiles():
     smiles = "INVALID_SMILES_123"
     frags = extract_functional_group_fragments(smiles)
-    assert len(frags) == 1
-    assert frags[0] == smiles
+    # An invalid unparseable SMILES returns [] (0 valid representations)
+    assert frags == []
 
 
 def test_context_preservation():

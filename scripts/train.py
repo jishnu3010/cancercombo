@@ -1,4 +1,4 @@
-"""Production training script for CancerCombo with AMP and gradient stability monitoring."""
+"""Production training script for CancerCombo with AMP, gradient stability monitoring, and strict preflight validation."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import argparse
 import os
 import sys
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import torch
@@ -26,6 +26,7 @@ from cancer_combo_brics.model import CancerComboBRICS
 from cancer_combo_brics.losses import SurfaceRegressionLoss
 from cancer_combo_brics.metrics import compute_surface_metrics, evaluate_predictions_grouped
 from cancer_combo_brics.diagnostics import compute_gradient_norms, inspect_surface_diagnostics
+from cancer_combo_brics.data.preflight import run_data_preflight
 
 
 def build_optimizer_and_scheduler(
@@ -82,6 +83,10 @@ def train_one_epoch(
 
     pbar = tqdm(loader, desc=f"Epoch {epoch+1}/{config.training.epochs} [Train]", leave=False)
     for step, batch in enumerate(pbar):
+        # Strict training validation check
+        if not torch.all(batch["is_valid_sample"]):
+            raise RuntimeError("Training batch contains missing/invalid SMILES samples! Preflight / dataset verification failed.")
+
         cell_expr = batch["cell_expr"].to(device, non_blocking=True)
         frags_A = batch["fragments_A"]
         mask_A = batch["mask_A"].to(device, non_blocking=True)
@@ -154,6 +159,8 @@ def evaluate_model(
     total_loss = 0.0
     records = []
     last_diagnostics = None
+    excluded_missing_smiles_count = 0
+    total_samples_seen = 0
 
     for batch in tqdm(loader, desc="Evaluating", leave=False):
         cell_expr = batch["cell_expr"].to(device, non_blocking=True)
@@ -188,10 +195,15 @@ def evaluate_model(
         y_true_np = y_true.cpu().numpy()
         y_pred_np = y_pred.cpu().numpy()
         scenarios_np = batch["scenarios"].numpy()
+        is_valid_np = batch["is_valid_sample"].cpu().numpy()
         cells = batch["cell_lines"]
         pairs = batch["drug_pairs"]
 
         for i in range(len(cells)):
+            total_samples_seen += 1
+            if not is_valid_np[i]:
+                excluded_missing_smiles_count += 1
+                continue
             records.append({
                 "y_true": y_true_np[i],
                 "y_pred": y_pred_np[i],
@@ -200,8 +212,15 @@ def evaluate_model(
                 "drug_pair": pairs[i],
             })
 
-    mean_loss = total_loss / len(loader)
+    mean_loss = total_loss / len(loader) if len(loader) > 0 else 0.0
     eval_results = evaluate_predictions_grouped(records)
+
+    coverage_pct = (len(records) / total_samples_seen * 100.0) if total_samples_seen > 0 else 0.0
+    print(
+        f"\n[Validation Stats] Total: {total_samples_seen} | Valid molecular samples: {len(records)} | "
+        f"Excluded missing-SMILES: {excluded_missing_smiles_count} | Coverage: {coverage_pct:.2f}%"
+    )
+
     return mean_loss, eval_results, last_diagnostics
 
 
@@ -211,6 +230,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=None, help="Override epochs")
     parser.add_argument("--batch_size", type=int, default=None, help="Override batch size")
     parser.add_argument("--device", type=str, default=None, help="Target device (cuda or cpu)")
+    parser.add_argument("--skip_preflight", action="store_true", help="Skip preflight data check")
     args = parser.parse_args()
 
     cfg = ExperimentConfig.from_yaml(args.config) if os.path.exists(args.config) else ExperimentConfig()
@@ -218,6 +238,12 @@ def main():
         cfg.training.epochs = args.epochs
     if args.batch_size is not None:
         cfg.training.batch_size = args.batch_size
+
+    # Run data preflight unless explicitly skipped
+    if not args.skip_preflight:
+        print("\n--- Running Pre-Training Data Preflight Diagnostic ---")
+        run_data_preflight(cfg)
+        print("----------------------------------------------------\n")
 
     set_seed(cfg.training.seed)
     device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
@@ -285,7 +311,6 @@ def main():
         preprocessor.save(cfg.data.cell_preprocessor_file)
         print(f"Fitted and saved cell preprocessor to: {cfg.data.cell_preprocessor_file}")
 
-
     norm_c_matrix = preprocessor.transform(raw_c_matrix)
     cell_expr_dict = {name: norm_c_matrix[i] for i, name in enumerate(c_names)}
 
@@ -308,7 +333,6 @@ def main():
         train_df = df.sample(frac=0.7, random_state=cfg.training.seed).reset_index(drop=True)
         val_df = df.drop(train_df.index).reset_index(drop=True)
         test_df = val_df
-
 
     print(f"Split sizes: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
 
@@ -347,7 +371,6 @@ def main():
         num_workers=cfg.training.num_workers,
         pin_memory=cfg.training.pin_memory and (device.type == "cuda"),
     )
-
 
     model = CancerComboBRICS(config=cfg.model).to(device)
     param_counts = count_parameters(model)

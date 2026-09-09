@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.sqlite
+data/fg_cache.sqlite
+data/brics_cache.sqlite

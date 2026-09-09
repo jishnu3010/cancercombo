@@ -1,8 +1,8 @@
-"""Mol2Vec fragment encoder using Morgan fingerprint identifier extraction.
+"""Morgan-environment-based learned fragment embedding module.
 
 Encodes functional-group/context fragments by extracting Morgan environment identifiers
-(radius 0 and radius 1), embedding them into a native D-dimensional space, and projecting
-the resulting vector to a trainable 512-D fragment representation.
+(radius 0 and radius 1), embedding them into a native 300-D space via a learnable EmbeddingBag,
+and projecting the resulting vector to a trainable 512-D fragment representation.
 """
 
 from __future__ import annotations
@@ -27,42 +27,42 @@ def extract_morgan_subgraph_identifiers(
     Args:
         smiles: Input fragment SMILES string.
         radius: Morgan fingerprint radius (0 and 1).
-        vocab_size: Hashing vocabulary size.
+        vocab_size: Hashing vocabulary size (default 50000).
 
     Returns:
-        List of integer token indices corresponding to Morgan subgraphs.
+        List of integer token indices corresponding to Morgan environment subgraphs.
     """
     if not smiles or not isinstance(smiles, str) or not smiles.strip():
         return [0]
 
     mol = Chem.MolFromSmiles(smiles.strip())
     if mol is None:
-        # Fallback to character/string hash if invalid
-        val = abs(hash(smiles)) % vocab_size
-        return [val if val != 0 else 1]
+        # Fallback to string hash if invalid
+        val = abs(hash(smiles)) % (vocab_size - 1) + 1
+        return [val]
 
     try:
         fp = rdMolDescriptors.GetMorganFingerprint(mol, radius)
         nonzero = fp.GetNonzeroElements()
         token_indices: List[int] = []
         for feat_id, count in nonzero.items():
-            idx = (feat_id % (vocab_size - 1)) + 1  # 1-indexed, reserving 0 for pad
+            idx = (feat_id % (vocab_size - 1)) + 1  # 1-indexed, reserving 0 for padding
             token_indices.extend([idx] * count)
 
         return token_indices if token_indices else [0]
     except Exception as e:
         logger.warning(f"Error extracting Morgan fingerprint for '{smiles}': {e}")
-        val = abs(hash(smiles)) % vocab_size
-        return [val if val != 0 else 1]
+        val = abs(hash(smiles)) % (vocab_size - 1) + 1
+        return [val]
 
 
 class Mol2VecEncoder(nn.Module):
-    """Mol2Vec encoder module mapping chemical fragments to 512-D vectors.
+    """Morgan-environment-based learned fragment embedding module mapping chemical fragments to 512-D vectors.
 
     Flow:
       1. Fragment SMILES -> Morgan environment identifiers (radius 0/1)
-      2. Identifier lookup + sum pooling -> D-dimensional vector (default D=300)
-      3. Linear projection + LayerNorm + Dropout -> 512-D fragment embedding
+      2. Identifier lookup + sum pooling -> D-dimensional vector (native_dim D=300)
+      3. Linear projection (300 -> 512) + LayerNorm + Dropout -> 512-D fragment embedding
     """
 
     def __init__(
@@ -138,7 +138,7 @@ class Mol2VecEncoder(nn.Module):
         indices_t = torch.tensor(flat_indices, dtype=torch.long, device=device)
         offsets_t = torch.tensor(offsets, dtype=torch.long, device=device)
 
-        # Sum-pooled native Mol2Vec embeddings: (K, native_dim)
+        # Sum-pooled native Mol2Vec embeddings: (K, native_dim=300)
         native_vecs = self.embedding_bag(indices_t, offsets_t)
         assert native_vecs.shape == (len(frag_smiles_list), self.native_dim)
 
