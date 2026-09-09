@@ -25,36 +25,29 @@ A clean, modular, and optimized PyTorch implementation for predicting complete *
            SMILES                            SMILES
               │                               │
               ▼                               ▼
-            BRICS                           BRICS
+    RDKit Functional-Group           RDKit Functional-Group
+    Fragmentation (1-hop)            Fragmentation (1-hop)
               │                               │
               ▼                               ▼
-     Shared pretrained                 Shared pretrained
-         MoLFormer                         MoLFormer
+      Morgan Subgraphs                 Morgan Subgraphs
+       (Mol2Vec d=300)                  (Mol2Vec d=300)
+              │                               │
+              ▼                               ▼
+     Learnable Projection             Learnable Projection
               │                               │
               ▼                               ▼
        F_A ∈ R^(N×512)                  F_B ∈ R^(M×512)
               │                               │
               └──────────────┬────────────────┘
                              ▼
-                  Cell-conditioned FiLM
-                             │
-                     F̃_A         F̃_B
-                             │
-                             ▼
-             Bidirectional shared-weight
-                  Fragment Cross-Attention
+                   Explicit Pairwise Fragment
+                          Interaction
                              │
                              ▼
-                          Pooling
+                  Masked Mean Pooling
                              │
                              ▼
-                       r_AB ∈ R^2048
-                             │
-                             ▼
-                     Projection → 512
-                             │
-                             ▼
-                        r'_AB ∈ R^512
+                       r_AB ∈ R^512
                              │
                 ┌────────────┼────────────┐
                 │            │            │
@@ -62,7 +55,7 @@ A clean, modular, and optimized PyTorch implementation for predicting complete *
                 │            c            │
                 │                         │
                 ▼                         ▼
-            r'_AB ⊙ c              |r'_AB - c|
+            r_AB ⊙ c                |r_AB - c|
                 │                         │
                 └────────────┬────────────┘
                              ▼
@@ -75,7 +68,7 @@ A clean, modular, and optimized PyTorch implementation for predicting complete *
                           r_gate
                              │
                              ▼
-                 [r'_AB ; c ; r_gate]
+                 [r_AB ; c ; r_gate]
                              │
                              ▼
                        r_DC ∈ R^1536
@@ -100,13 +93,20 @@ A clean, modular, and optimized PyTorch implementation for predicting complete *
 
 ## Key Features & Highlights
 
-- **Strict Architecture 1 Adherence**: Cell line encoder ($976 \to 512$), deterministic RDKit BRICS decomposition with persistent caching, shared pretrained MoLFormer projection to 512-D, cell-conditioned FiLM with identity initialization, bidirectional shared-weight cross-attention, masked mean + max pooling ($r_{AB} \in \mathbb{R}^{2048} \to r'_{AB} \in \mathbb{R}^{512}$), explicit Drug-Cell interaction with Sigmoid MLP gate ($r_{DC} \in \mathbb{R}^{1536}$), 8 pharmacological parameter heads ($e_1, e_2, e_3, \log C_1, \log C_2, h_1, h_2, \alpha$), vectorized Bivariate Hill Solver ($e_0 = 1.0$), and bounded dose-dependent bias.
-- **Normalized Viability Scale**: Single-pass conversion: $100\% \to 1.0$, guaranteeing internal mathematical consistency across all heads, constraints, and losses.
+- **Adherence to Functional-Group & Mol2Vec Architecture**:
+  - Cell line encoder ($976 \to 512$).
+  - RDKit Functional-Group decomposition with 1-hop context preservation and persistent SQLite caching (`fg_cache_v1`).
+  - Mol2Vec Morgan subgraph environment vectorizer ($D=300$) with learnable 512-D projection.
+  - Explicit Pairwise Fragment Interaction MLP ($z_{ij} \in \mathbb{R}^{2048} \to 512 \to 512$) with masked mean pooling ($r_{AB} \in \mathbb{R}^{512}$).
+  - Explicit Drug-Cell interaction with Sigmoid MLP gate ($r_{\text{DC}} \in \mathbb{R}^{1536}$).
+  - 8 pharmacological parameter heads ($e_1, e_2, e_3, \log C_1, \log C_2, h_1, h_2, \alpha$).
+  - Vectorized Bivariate Hill Solver ($e_0 = 100.0$) and bounded dose-dependent bias.
+- **Percentage Viability Scale**: Percentage viability target scale ($100.0 = 100\%$), guaranteeing internal mathematical consistency across all heads, constraints, and solver predictions.
 - **Unseen-Drug Generalization**: Strict drug-disjoint dataset splitting ($\text{Drugs}_{\text{train}} \cap \text{Drugs}_{\text{test}} = \emptyset$) and stratified evaluation across:
   - **Scenario 1**: Both drugs seen in training.
   - **Scenario 2**: One drug seen + one drug unseen.
   - **Scenario 3**: Both drugs unseen (primary research objective).
-- **Production Performance**: Drug-level base fragment embedding caching, AMP mixed precision, unscaled gradient clipping, separate learning rate parameter groups for MoLFormer vs new layers, and zero-loop vectorized tensor operations.
+- **Production Performance**: AMP mixed precision, unscaled gradient clipping, zero-loop vectorized tensor operations, and cross-platform picklable DataLoader collation.
 
 ---
 
@@ -116,7 +116,9 @@ A clean, modular, and optimized PyTorch implementation for predicting complete *
 CancerCombo-BRICS/
 │
 ├── data/                             # Dataset root (auto-discovered)
-│   ├── brics_cache.sqlite            # Persistent SQLite BRICS fragment cache
+│   ├── scenario3_drug_level.csv      # Primary drug combination dataset
+│   ├── cell_line_gene_expr.csv       # Cell line gene expression matrix
+│   ├── fg_cache.sqlite               # Persistent SQLite functional group cache
 │   └── ...
 │
 ├── cancer_combo_brics/               # Core library
@@ -124,24 +126,23 @@ CancerCombo-BRICS/
 │   ├── config.py                     # Typed dataclass and YAML configurations
 │   ├── data/
 │   │   ├── dataset.py                # Dataset and dynamic collation
-│   │   ├── preprocessing.py          # Train-only cell expression standardization
+│   │   ├── preprocessing.py          # Automatic CSV orientation & cell standardization
 │   │   ├── splitting.py              # Drug-disjoint splits and scenario classifier
 │   │   └── validation.py             # Discovery, schema checks, and statistics
 │   ├── chemistry/
-│   │   ├── brics.py                  # RDKit BRICS decomposition with canonicalization
+│   │   ├── functional_group_fragments.py # RDKit functional group matching (1-hop)
 │   │   ├── cache.py                  # Thread-safe persistent & memory caching
 │   │   └── fragment_utils.py         # Batch padding and fragment masks
 │   ├── encoders/
 │   │   ├── cell_encoder.py           # 976 -> 512 MLP with LayerNorm & GELU
-│   │   ├── molformer.py              # MoLFormer backbone wrapper & mock mode
-│   │   └── fragment_encoder.py       # Projection to 512-D and drug-level cache
+│   │   ├── mol2vec_encoder.py        # Mol2Vec Morgan environment vectorizer (D=300 -> 512)
+│   │   └── fragment_encoder.py       # Fragment encoder wrapper
 │   ├── interaction/
-│   │   ├── film.py                   # Cell-conditioned FiLM with identity init
-│   │   ├── cross_attention.py        # Shared-weight bidirectional cross-attention
+│   │   ├── pairwise_interaction.py   # Explicit Pairwise Fragment Interaction (512)
 │   │   └── drug_cell.py              # z_DC (2048), Sigmoid gate, r_DC (1536)
 │   ├── pharmacology/
 │   │   ├── parameter_heads.py        # 8 scalar parameter heads
-│   │   ├── constraints.py            # Biological domain transformations (e0=1.0)
+│   │   ├── constraints.py            # Biological domain transformations (e0=100.0)
 │   │   ├── bivariate_hill.py         # Differentiable vectorized bivariate Hill solver
 │   │   └── dose_bias.py              # Bounded dose-dependent bias
 │   ├── model.py                      # Full end-to-end model
@@ -157,18 +158,15 @@ CancerCombo-BRICS/
 │   └── inference.py                  # Predict 2D surfaces for unseen pairs
 │
 ├── configs/
-│   └── default.yaml                  # Baseline configuration file
+│   ├── default.yaml                  # Baseline configuration file
+│   └── test_run.yaml                 # Fast verification test run configuration
 │
-├── tests/                            # Comprehensive PyTest test suite
-│   ├── test_data.py
-│   ├── test_brics.py
-│   ├── test_encoders.py
-│   ├── test_film.py
-│   ├── test_attention.py
-│   ├── test_drug_cell.py
-│   ├── test_hill.py
-│   ├── test_model.py
-│   └── test_split.py
+├── tests/                            # Comprehensive PyTest test suite (40 tests)
+│   ├── test_architecture_verification.py
+│   ├── test_functional_groups.py
+│   ├── test_mol2vec.py
+│   ├── test_pairwise_interaction.py
+│   └── ...
 │
 ├── results/                          # Logs, metrics, and figures
 ├── checkpoints/                      # Saved models and preprocessing stats
@@ -184,67 +182,44 @@ CancerCombo-BRICS/
 pip install -r requirements.txt
 ```
 
-Required packages: `torch`, `transformers`, `rdkit`, `scipy`, `scikit-learn`, `pandas`, `numpy`, `pyyaml`, `tqdm`, `pytest`.
-
 ---
 
-## Data Preparation & Validation
+## Complete DGX / Execution Commands (Step-by-Step)
 
-Place your dataset files in `./data/`. The system auto-discovers combination files (`.csv`, `.tsv`, `.parquet`) and cell expression profiles (`.csv`, `.tsv`, `.npz`).
-
-To inspect and validate your dataset:
+### 1. Update Repository
 ```bash
-python scripts/prepare_data.py --config configs/default.yaml
+git fetch origin
+git reset --hard origin/main
 ```
 
-To generate a synthetic cancer combination dataset for immediate end-to-end dry runs:
+### 2. Verify Architecture & Data Pipeline via PyTest
 ```bash
-python scripts/prepare_data.py --synthetic --samples 100
+python -m pytest
 ```
 
----
-
-## Training
-
-Train with mixed precision, gradient monitoring, and separate learning rates:
+### 3. Run Short Verification Test Run (2 Epochs, Batch Size 16)
 ```bash
-python scripts/train.py --config configs/default.yaml
+python scripts/train.py --config configs/test_run.yaml --device cuda
 ```
 
-Options:
-- `--epochs N`: Override epoch count
-- `--batch_size N`: Override batch size
-- `--device cuda|cpu`: Specify device
-
----
-
-## Evaluation
-
-Evaluate model checkpoint across the test set and breakdown performance by Scenario 1, Scenario 2, and Scenario 3:
+### 4. Run Full Production Training (50 Epochs, AMP Mixed Precision)
 ```bash
-python scripts/evaluate.py --config configs/default.yaml --checkpoint checkpoints/best_model.pt
+python scripts/train.py --config configs/default.yaml --device cuda
 ```
 
----
+### 5. Evaluate Best Checkpoint Across Unseen-Drug Scenarios 1, 2, 3
+```bash
+python scripts/evaluate.py --config configs/default.yaml --checkpoint checkpoints/best_model.pt --output results/evaluation_metrics.json --device cuda
+```
 
-## Inference
-
-Predict the complete 2D dose-response surface and 8 pharmacological parameters for any pair of drug SMILES and cell line:
+### 6. Run Single Pair Inference Prediction
 ```bash
 python scripts/inference.py \
     --config configs/default.yaml \
     --checkpoint checkpoints/best_model.pt \
     --smiles_a "CC(=O)Oc1ccccc1C(=O)O" \
     --smiles_b "CN1C=NC2=C1C(=O)N(C(=O)N2C)C" \
-    --cell_id "CELL_01" \
-    --doses_a "0.0, 0.01, 0.05, 0.2, 1.0, 3.0, 10.0, 30.0" \
-    --doses_b "0.0, 0.005, 0.02, 0.1, 0.5, 2.0, 8.0, 25.0"
-```
-
----
-
-## Running Unit & Integration Tests
-
-```bash
-pytest tests/ -v
+    --cell_id "MCF7" \
+    --output results/inference_output.json \
+    --device cuda
 ```
