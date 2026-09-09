@@ -98,8 +98,8 @@ class CancerComboDataset(Dataset):
         self.dose_col_a = dose_col_a if dose_col_a in self.df.columns else ("dose_a" if "dose_a" in self.df.columns else dose_col_a)
         self.dose_col_b = dose_col_b if dose_col_b in self.df.columns else ("dose_b" if "dose_b" in self.df.columns else dose_col_b)
         self.viability_col = viability_col if viability_col in self.df.columns else ("viability" if "viability" in self.df.columns else viability_col)
-        self.drug_id_col_a = drug_id_col_a
-        self.drug_id_col_b = drug_id_col_b
+        self.drug_id_col_a = drug_id_col_a if (drug_id_col_a in self.df.columns) else ("drug_a" if "drug_a" in self.df.columns else self.smiles_col_a)
+        self.drug_id_col_b = drug_id_col_b if (drug_id_col_b in self.df.columns) else ("drug_b" if "drug_b" in self.df.columns else self.smiles_col_b)
         self.target_scale = target_scale
         self.max_fragments = max_fragments
 
@@ -161,7 +161,7 @@ class CancerComboDataset(Dataset):
         # Metadata
         drug_a_id = str(row[self.drug_id_col_a]) if self.drug_id_col_a in row else smiles_a
         drug_b_id = str(row[self.drug_id_col_b]) if self.drug_id_col_b in row else smiles_b
-        scenario = int(row["scenario"]) if "scenario" in row else 1
+        scenario = int(row["scenario"]) if "scenario" in row else (int(row["split"]) if "split" in row and str(row["split"]).isdigit() else 3)
 
         return {
             "cell_expr": cell_expr.astype(np.float32),

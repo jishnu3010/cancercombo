@@ -23,7 +23,7 @@ from cancer_combo_brics.data.dataset import CancerComboDataset, ComboBatchCollat
 from cancer_combo_brics.data.preprocessing import CellExpressionPreprocessor, load_cell_expression_data
 from cancer_combo_brics.chemistry.cache import FunctionalGroupCache
 from cancer_combo_brics.model import CancerComboBRICS
-from cancer_combo_brics.losses import SurfaceRegressionLoss
+from cancer_combo_brics.losses import SurfaceRegressionLoss, CancerComboLoss
 from cancer_combo_brics.metrics import compute_surface_metrics, evaluate_predictions_grouped
 from cancer_combo_brics.diagnostics import compute_gradient_norms, inspect_surface_diagnostics
 from cancer_combo_brics.data.preflight import run_data_preflight
@@ -54,11 +54,20 @@ def build_optimizer_and_scheduler(
         optimizer = torch.optim.SGD(param_groups, momentum=0.9)
 
     # Learning rate scheduler
-    if config.optimizer.scheduler == "cosine":
+    sched_type = config.optimizer.scheduler.lower()
+    if sched_type == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
             T_max=max(1, num_training_steps),
             eta_min=config.optimizer.min_lr,
+        )
+    elif sched_type in ("plateau", "reducelronplateau"):
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="min",
+            factor=config.optimizer.scheduler_factor,
+            patience=config.optimizer.scheduler_patience,
+            min_lr=config.optimizer.min_lr,
         )
     else:
         scheduler = None
@@ -143,7 +152,7 @@ def train_one_epoch(
 
             optimizer.zero_grad(set_to_none=True)
 
-            if scheduler is not None and step_executed:
+            if scheduler is not None and step_executed and not isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 scheduler.step()
 
         batch_loss = loss.item() * (config.training.gradient_accumulation_steps if config.training.gradient_accumulation_steps > 1 else 1.0)
@@ -325,7 +334,11 @@ def main():
 
     if preprocessor is None:
         preprocessor = CellExpressionPreprocessor(expected_dim=raw_c_matrix.shape[1])
-        train_cells = df[df["split"] == "train"][cfg.data.cell_id_col].unique() if "split" in df.columns else c_names
+        if "split" in df.columns:
+            s_col = df["split"].astype(str)
+            train_cells = df[s_col.isin(["1", "train", "TRAIN"])][cfg.data.cell_id_col].unique()
+        else:
+            train_cells = c_names
         train_indices = [i for i, name in enumerate(c_names) if name in train_cells] or list(range(len(c_names)))
         preprocessor.fit(raw_c_matrix[train_indices])
         preprocessor.save(cfg.data.cell_preprocessor_file)
@@ -416,7 +429,14 @@ def main():
     total_steps = len(train_loader) * cfg.training.epochs
     optimizer, scheduler = build_optimizer_and_scheduler(model, cfg, total_steps)
     scaler = torch.amp.GradScaler("cuda", enabled=(cfg.training.mixed_precision and device.type == "cuda"))
-    criterion = SurfaceRegressionLoss(loss_type=cfg.training.loss_type, delta=cfg.training.huber_delta)
+    if cfg.training.loss_type.lower() == "cancer_combo":
+        criterion = CancerComboLoss(
+            rank_lambda=getattr(cfg.training, "rank_lambda", 1.0),
+            aux_lambda=getattr(cfg.training, "aux_lambda", 0.05),
+            num_ranking_pairs=getattr(cfg.training, "num_ranking_pairs", 256),
+        )
+    else:
+        criterion = SurfaceRegressionLoss(loss_type=cfg.training.loss_type, delta=cfg.training.huber_delta)
 
     start_epoch = 0
     best_val_rmse = float("inf")
@@ -458,7 +478,15 @@ def main():
         val_rmse = val_eval["overall"]["rmse"]
         val_r2 = val_eval["overall"]["r2"]
         val_pearson = val_eval["overall"]["pearson"]
+        val_spearman = val_eval["overall"].get("spearman", 0.0)
         epoch_time = time.time() - t0
+
+        # Step epoch-level scheduler (ReduceLROnPlateau) matching finalcheck
+        if scheduler is not None and isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.step(val_loss)
+
+        current_lr = optimizer.param_groups[0]["lr"] if (optimizer and optimizer.param_groups) else cfg.optimizer.lr_new
+        lr_str = f"{current_lr:.12e}"
 
         log_row = {
             "epoch": epoch + 1,
@@ -467,6 +495,8 @@ def main():
             "val_rmse": val_rmse,
             "val_r2": val_r2,
             "val_pearson": val_pearson,
+            "val_spearman": val_spearman,
+            "lr": current_lr,
             "train_grad_norm": train_res["train_grad_norm"],
             "gpu_memory_mb": get_gpu_memory_mb(),
             "time_sec": epoch_time,
@@ -480,7 +510,10 @@ def main():
             f"Train Loss: {train_res['train_loss']:.4f} | "
             f"Val Loss: {val_loss:.4f} | "
             f"Val RMSE: {val_rmse:.4f} | "
+            f"Val Pearson: {val_pearson:.4f} | "
+            f"Val Spearman: {val_spearman:.4f} | "
             f"Val R^2: {val_r2:.4f} | "
+            f"LR = {lr_str} | "
             f"Grad Norm: {train_res['train_grad_norm']:.2f} | "
             f"Time: {epoch_time:.1f}s"
         )

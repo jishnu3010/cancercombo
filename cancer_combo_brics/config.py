@@ -16,8 +16,8 @@ class DataConfig:
     fg_cache_file: str = "./data/fg_cache.sqlite"
     fg_radius: int = 1
     cell_preprocessor_file: str = "./checkpoints/cell_preprocessor.npz"
-    drug_id_col_a: str = "drug_a"
-    drug_id_col_b: str = "drug_b"
+    drug_id_col_a: str = "smiles_a"
+    drug_id_col_b: str = "smiles_b"
     smiles_col_a: str = "smiles_a"
     smiles_col_b: str = "smiles_b"
     cell_id_col: str = "cell_line_name"
@@ -52,16 +52,19 @@ class ModelConfig:
 
 @dataclass
 class TrainingConfig:
-    batch_size: int = 32
+    batch_size: int = 128  # Matched to finalcheck stable surface gradient batch size
     epochs: int = 50
-    gradient_clip: float = 1.0
+    gradient_clip: float = 5.0  # Matched to finalcheck gradient clipping
     mixed_precision: bool = True
     gradient_accumulation_steps: int = 1
     num_workers: int = 0
     pin_memory: bool = True
     seed: int = 42
-    loss_type: str = "huber"  # huber, mse, mae
+    loss_type: str = "cancer_combo"  # cancer_combo (MSE + Margin Ranking), mse, huber, mae
     huber_delta: float = 0.05
+    rank_lambda: float = 1.0  # Ranking loss coefficient matching finalcheck
+    aux_lambda: float = 0.05  # Parameter supervision auxiliary coefficient matching finalcheck
+    num_ranking_pairs: int = 256
 
 
 @dataclass
@@ -69,10 +72,12 @@ class OptimizerConfig:
     type: str = "AdamW"
     lr_new: float = 1e-4
     # Note: lr_mol2vec removed — pretrained Mol2Vec is frozen (not trainable).
-    weight_decay: float = 1e-4
-    scheduler: str = "cosine"  # cosine, plateau, linear, none
+    weight_decay: float = 1e-5  # Matched to finalcheck AdamW weight decay
+    scheduler: str = "plateau"  # plateau (ReduceLROnPlateau), cosine, linear, none
+    scheduler_factor: float = 0.5  # ReduceLROnPlateau reduction factor matching finalcheck
+    scheduler_patience: int = 10  # ReduceLROnPlateau patience matching finalcheck
     warmup_epochs: int = 3
-    min_lr: float = 1e-6
+    min_lr: float = 1e-6  # Minimum learning rate matching finalcheck
 
 
 @dataclass
