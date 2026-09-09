@@ -15,8 +15,10 @@ from typing import Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import rdkit.Chem as Chem
-from gensim.models import Word2Vec
-from mol2vec.features import mol2alt_sentence
+
+# NOTE: gensim and mol2vec are imported lazily inside Mol2VecEncoder.__init__
+# to allow the rest of the package to be importable even when gensim is not installed.
+# Tests that do not need Mol2Vec (checkpoint, pairwise, cell encoder, etc.) will still run.
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,21 @@ class Mol2VecEncoder(nn.Module):
         self.fragment_dim = fragment_dim
         self.radius = radius
 
+        # Lazy import of gensim/mol2vec — deferred to instantiation time so the
+        # rest of the package can be imported without gensim being installed.
+        try:
+            from gensim.models import Word2Vec as _Word2Vec
+            from mol2vec.features import mol2alt_sentence as _mol2alt_sentence
+        except ImportError as e:
+            raise ImportError(
+                f"Mol2VecEncoder requires gensim>=4.0 and mol2vec. "
+                f"On Python 3.14, install Microsoft C++ Build Tools first, then: "
+                f"pip install 'gensim>=4.1.0,<5.0' mol2vec\n"
+                f"Original error: {e}"
+            ) from e
+        # Cache mol2alt_sentence for use in tokenize_fragment
+        self._mol2alt_sentence = _mol2alt_sentence
+
         if model_path is None:
             # Check default path options
             possible_paths = [
@@ -59,7 +76,7 @@ class Mol2VecEncoder(nn.Module):
             )
 
         logger.info(f"Loading genuine pretrained Mol2Vec model from '{model_path}'...")
-        w2v_model = Word2Vec.load(model_path)
+        w2v_model = _Word2Vec.load(model_path)
         assert w2v_model.wv.vector_size == native_dim, (
             f"Expected Mol2Vec vector dimension {native_dim}, got {w2v_model.wv.vector_size}"
         )
@@ -116,7 +133,7 @@ class Mol2VecEncoder(nn.Module):
             return [0]
 
         try:
-            tokens = mol2alt_sentence(mol, radius=self.radius)
+            tokens = self._mol2alt_sentence(mol, radius=self.radius)
             indices = [self.token_to_idx.get(t, 0) for t in tokens]
             return indices if indices else [0]
         except Exception as e:
@@ -177,8 +194,11 @@ class Mol2VecEncoder(nn.Module):
         output = torch.zeros((B, N, self.fragment_dim), device=device)
         mask = mask.to(device)
 
-        is_training = self.training or any(p.requires_grad for p in self.parameters())
-        allow_cache = use_cache and not is_training
+        # Correct cache criterion: use self.training mode only.
+        # The Mol2Vec embedding is frozen (requires_grad=False) so its detached output
+        # is safe to cache during eval. The projection layer has requires_grad=True
+        # but that does NOT make caching unsafe — only training mode does.
+        allow_cache = use_cache and not self.training
 
         unique_to_encode: List[str] = []
         frag_to_idx: Dict[str, int] = {}

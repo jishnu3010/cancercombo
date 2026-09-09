@@ -60,18 +60,15 @@ class TrainingConfig:
     num_workers: int = 0
     pin_memory: bool = True
     seed: int = 42
-    early_stopping_patience: int = 10
     loss_type: str = "huber"  # huber, mse, mae
     huber_delta: float = 0.05
-    eval_interval_epochs: int = 1
-    diagnostics_interval_steps: int = 50
 
 
 @dataclass
 class OptimizerConfig:
     type: str = "AdamW"
     lr_new: float = 1e-4
-    lr_mol2vec: float = 1e-4
+    # Note: lr_mol2vec removed — pretrained Mol2Vec is frozen (not trainable).
     weight_decay: float = 1e-4
     scheduler: str = "cosine"  # cosine, plateau, linear, none
     warmup_epochs: int = 3
@@ -92,7 +89,6 @@ class LoggingConfig:
     experiment_name: str = "functional_group_mol2vec_experiment"
     log_dir: str = "./results"
     checkpoint_dir: str = "./checkpoints"
-    save_top_k: int = 3
 
 
 @dataclass

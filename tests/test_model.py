@@ -1,9 +1,13 @@
 """Integration tests for end-to-end CancerComboBRICS forward and backward passes."""
 
+import pytest
 import torch
+from tests.conftest import requires_gensim
 from cancer_combo_brics.config import ModelConfig
 from cancer_combo_brics.model import CancerComboBRICS
 from cancer_combo_brics.losses import SurfaceRegressionLoss
+
+pytestmark = requires_gensim
 
 
 def test_full_model_synthetic_forward_backward():

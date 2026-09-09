@@ -1,8 +1,12 @@
 """Unit tests for Mol2Vec encoder and fragment projection."""
 
+import pytest
 import torch
+from tests.conftest import requires_gensim
 from cancer_combo_brics.encoders.mol2vec_encoder import Mol2VecEncoder
 from cancer_combo_brics.encoders.fragment_encoder import FragmentEncoder
+
+pytestmark = requires_gensim
 
 
 def test_mol2vec_native_and_projected_dimensions():

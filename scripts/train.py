@@ -337,13 +337,27 @@ def main():
             test_df = df[s_col.str.lower() == "test"].reset_index(drop=True)
 
         if len(train_df) == 0:
-            train_df = df.sample(frac=0.7, random_state=cfg.training.seed).reset_index(drop=True)
-            val_df = df.drop(train_df.index).reset_index(drop=True)
-            test_df = val_df
+            # Fallback: genuine 3-way split using original indices (avoids index-reset leakage)
+            train_samples = df.sample(frac=0.7, random_state=cfg.training.seed)
+            train_indices = train_samples.index
+            remaining = df.drop(train_indices)
+            val_samples = remaining.sample(frac=0.5, random_state=cfg.training.seed)
+            val_indices = val_samples.index
+            test_samples = remaining.drop(val_indices)
+            train_df = train_samples.reset_index(drop=True)
+            val_df = val_samples.reset_index(drop=True)
+            test_df = test_samples.reset_index(drop=True)
     else:
-        train_df = df.sample(frac=0.7, random_state=cfg.training.seed).reset_index(drop=True)
-        val_df = df.drop(train_df.index).reset_index(drop=True)
-        test_df = val_df
+        # Fallback: genuine 3-way split using original indices (avoids index-reset leakage)
+        train_samples = df.sample(frac=0.7, random_state=cfg.training.seed)
+        train_indices = train_samples.index
+        remaining = df.drop(train_indices)
+        val_samples = remaining.sample(frac=0.5, random_state=cfg.training.seed)
+        val_indices = val_samples.index
+        test_samples = remaining.drop(val_indices)
+        train_df = train_samples.reset_index(drop=True)
+        val_df = val_samples.reset_index(drop=True)
+        test_df = test_samples.reset_index(drop=True)
 
     print(f"Split sizes: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
 
@@ -462,6 +476,12 @@ def main():
             f"Time: {epoch_time:.1f}s"
         )
 
+        # Determine is_best FIRST, then update best_val_rmse, then save both checkpoints
+        # This ensures last_model.pt always contains the TRUE current best metric.
+        is_best = val_rmse < best_val_rmse
+        if is_best:
+            best_val_rmse = val_rmse
+
         save_checkpoint(
             os.path.join(cfg.logging.checkpoint_dir, "last_model.pt"),
             model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
@@ -469,8 +489,7 @@ def main():
             config=cfg.to_dict(), seed=cfg.training.seed,
         )
 
-        if val_rmse < best_val_rmse:
-            best_val_rmse = val_rmse
+        if is_best:
             save_checkpoint(
                 os.path.join(cfg.logging.checkpoint_dir, "best_model.pt"),
                 model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler,

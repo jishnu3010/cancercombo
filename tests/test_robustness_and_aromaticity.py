@@ -8,6 +8,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import rdkit.Chem as Chem
+from tests.conftest import requires_gensim
 
 # Add project root to sys.path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -175,6 +176,7 @@ def test_13_16_accepted_fragments_strictly_valid():
 # -------------------------------------------------------------------
 # 17. MOL2VEC RECEIVES ONLY VALID FRAGMENTS
 # -------------------------------------------------------------------
+@requires_gensim
 def test_17_mol2vec_receives_only_valid_fragments():
     encoder = Mol2VecEncoder(native_dim=300, fragment_dim=512)
     frags = [["CC(=O)O", "c1ccccc1"]]
@@ -200,6 +202,7 @@ def test_18_19_variable_fragment_counts_pairwise():
 # -------------------------------------------------------------------
 # 20-23. ARCHITECTURE SHAPES: r_AB=512, r_DC=1536, 8 HEADS (1536->1024->8)
 # -------------------------------------------------------------------
+@requires_gensim
 def test_20_23_architecture_shapes():
     cfg = ModelConfig(cell_dim=976, fragment_dim=512)
     model = CancerComboBRICS(config=cfg)

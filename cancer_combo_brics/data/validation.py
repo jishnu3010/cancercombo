@@ -147,7 +147,8 @@ def validate_dataset(
     print(f"  Min: {v_min:.2f} | Max: {v_max:.2f} | Mean: {v_mean:.2f} | Std: {v_std:.2f}")
 
     if v_max > 3.0:
-        print(f"  Scale detected: PERCENTAGE VIABILITY (will be normalized via Y / 100.0)")
+        print(f"  Scale detected: PERCENTAGE VIABILITY")
+        print(f"  Training convention: 100.0 = 100% viability. No target /100 normalization is applied.")
     else:
         print(f"  Scale detected: ALREADY NORMALIZED VIABILITY (1.0 = 100%)")
 

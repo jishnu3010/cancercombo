@@ -2,6 +2,7 @@
 
 import pytest
 import torch
+from tests.conftest import requires_gensim
 from cancer_combo_brics.encoders.cell_encoder import CellEncoder
 from cancer_combo_brics.encoders.fragment_encoder import FragmentEncoder
 from cancer_combo_brics.encoders.mol2vec_encoder import Mol2VecEncoder
@@ -15,6 +16,7 @@ def test_cell_encoder_dimensions():
     assert not torch.isnan(c).any()
 
 
+@requires_gensim
 def test_fragment_encoder_mol2vec():
     mol2vec = Mol2VecEncoder(model_path="data/model_300dim.pkl", native_dim=300, fragment_dim=512)
     frag_encoder = FragmentEncoder(mol2vec=mol2vec, fragment_dim=512)

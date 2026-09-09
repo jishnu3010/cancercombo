@@ -42,16 +42,12 @@ training:
   num_workers: 4
   pin_memory: true
   seed: 42
-  early_stopping_patience: 10
   loss_type: "huber"
   huber_delta: 0.05
-  eval_interval_epochs: 1
-  diagnostics_interval_steps: 50
 
 optimizer:
   type: "AdamW"
   lr_new: 0.0001
-  lr_mol2vec: 0.0001
   weight_decay: 0.0001
   scheduler: "cosine"
   warmup_epochs: 3
@@ -71,4 +67,3 @@ logging:
   experiment_name: "functional_group_mol2vec_dgx"
   log_dir: "./results"
   checkpoint_dir: "./checkpoints"
-  save_top_k: 3

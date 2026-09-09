@@ -3,8 +3,11 @@
 import pytest
 import torch
 import torch.nn as nn
+from tests.conftest import requires_gensim
 from cancer_combo_brics.config import ModelConfig
 from cancer_combo_brics.model import CancerComboBRICS
+
+pytestmark = requires_gensim
 
 
 def test_deactivation_of_removed_modules():

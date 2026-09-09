@@ -7,11 +7,15 @@ import os
 import pytest
 import torch
 import torch.nn as nn
+from tests.conftest import requires_gensim
 from cancer_combo_brics.encoders.mol2vec_encoder import Mol2VecEncoder
 from cancer_combo_brics.encoders.fragment_encoder import FragmentEncoder
 from cancer_combo_brics.config import ModelConfig
 from cancer_combo_brics.model import CancerComboBRICS
 from cancer_combo_brics.chemistry.functional_group_fragments import extract_functional_group_fragments
+
+# All tests in this file require gensim >= 4.0 to be installed
+pytestmark = requires_gensim
 
 MODEL_PATH = "data/model_300dim.pkl"
 

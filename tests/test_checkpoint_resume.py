@@ -8,6 +8,7 @@ import pytest
 import numpy as np
 import torch
 import torch.nn as nn
+from tests.conftest import requires_gensim
 
 from cancer_combo_brics.config import ModelConfig, ExperimentConfig
 from cancer_combo_brics.model import CancerComboBRICS
@@ -218,6 +219,7 @@ def test_training_history_preservation(tmp_path):
     assert loaded_history[-1]["epoch"] == 37
 
 
+@requires_gensim
 def test_pretrained_mol2vec_remains_frozen(tmp_path):
     config = ModelConfig()
     model = CancerComboBRICS(config)
@@ -233,6 +235,7 @@ def test_pretrained_mol2vec_remains_frozen(tmp_path):
     assert mol2vec.embeddings.weight.requires_grad is False, "Mol2Vec embeddings must remain frozen after load!"
 
 
+@requires_gensim
 def test_architecture_dimensions_invariants():
     config = ModelConfig()
     model = CancerComboBRICS(config)
@@ -244,6 +247,7 @@ def test_architecture_dimensions_invariants():
     assert model.cell_encoder.net[0].out_features == 512
 
 
+@requires_gensim
 def test_eight_heads_remain_independent():
     config = ModelConfig()
     model = CancerComboBRICS(config)

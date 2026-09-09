@@ -8,3 +8,11 @@ numpy>=1.24.0
 pyyaml>=6.0
 tqdm>=4.65.0
 pytest>=7.3.0
+# Mol2Vec dependencies — requires C++ Build Tools on Windows to compile from source.
+# Pre-built binary wheels for gensim>=4.0 are available for Python <=3.12.
+# On Python 3.14, install Microsoft C++ Build Tools first:
+#   https://visualstudio.microsoft.com/visual-cpp-build-tools/
+# Then: pip install "gensim>=4.1.0,<5.0" mol2vec
+# Compatible pinned versions:
+#   gensim==4.3.3
+#   mol2vec==0.1

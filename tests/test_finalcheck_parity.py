@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
+from tests.conftest import requires_gensim
 
 # Add bricks2 project root to sys.path
 BRICKS2_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -376,6 +377,7 @@ def test_i_numerical_stability():
 # ------------------------------------------------------------
 # TEST J — OUTPUT SHAPE
 # ------------------------------------------------------------
+@requires_gensim
 def test_j_output_shape():
     """Verify output shape matches complete 2D dose-response matrix [B, n_dose_A, n_dose_B]."""
     cfg = ModelConfig(cell_dim=976, fragment_dim=512)
