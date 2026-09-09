@@ -18,7 +18,7 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from cancer_combo_brics.config import ExperimentConfig
-from cancer_combo_brics.utils import set_seed, save_checkpoint, count_parameters, get_gpu_memory_mb
+from cancer_combo_brics.utils import set_seed, save_checkpoint, load_checkpoint, count_parameters, get_gpu_memory_mb
 from cancer_combo_brics.data.dataset import CancerComboDataset, ComboBatchCollator
 from cancer_combo_brics.data.preprocessing import CellExpressionPreprocessor, load_cell_expression_data
 from cancer_combo_brics.chemistry.cache import FunctionalGroupCache
@@ -231,7 +231,18 @@ def main():
     parser.add_argument("--batch_size", type=int, default=None, help="Override batch size")
     parser.add_argument("--device", type=str, default=None, help="Target device (cuda or cpu)")
     parser.add_argument("--skip_preflight", action="store_true", help="Skip preflight data check")
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        nargs="?",
+        const="checkpoints/last_model.pt",
+        help="Path to checkpoint file to resume training from",
+    )
     args = parser.parse_args()
+
+    if args.resume is not None and not os.path.exists(args.resume):
+        raise FileNotFoundError(f"Resume failed: Checkpoint file '{args.resume}' does not exist.")
 
     cfg = ExperimentConfig.from_yaml(args.config) if os.path.exists(args.config) else ExperimentConfig()
     if args.epochs is not None:
@@ -384,11 +395,36 @@ def main():
     scaler = torch.amp.GradScaler("cuda", enabled=(cfg.training.mixed_precision and device.type == "cuda"))
     criterion = SurfaceRegressionLoss(loss_type=cfg.training.loss_type, delta=cfg.training.huber_delta)
 
+    start_epoch = 0
     best_val_rmse = float("inf")
     history: List[Dict[str, Any]] = []
 
-    print("\nStarting training loop...")
-    for epoch in range(cfg.training.epochs):
+    if args.resume:
+        print(f"\n==================================================")
+        print(f"RESUMING TRAINING")
+        print(f"Checkpoint: {args.resume}")
+        checkpoint = load_checkpoint(
+            args.resume,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            scaler=scaler,
+            map_location=str(device),
+        )
+        completed_epoch = checkpoint.get("epoch", 0)
+        start_epoch = completed_epoch
+        best_val_rmse = checkpoint.get("best_metric", float("inf"))
+        history = checkpoint.get("training_history", [])
+        lr = optimizer.param_groups[0]["lr"] if (optimizer and optimizer.param_groups) else cfg.optimizer.lr_new
+        print(f"Completed epoch: {completed_epoch}")
+        print(f"Starting epoch: {start_epoch + 1}")
+        print(f"Best validation RMSE: {best_val_rmse:.4f}")
+        print(f"Learning rate: {lr}")
+        print(f"==================================================\n")
+    else:
+        print("\nStarting new training run...")
+
+    for epoch in range(start_epoch, cfg.training.epochs):
         t0 = time.time()
 
         train_res = train_one_epoch(
@@ -429,8 +465,8 @@ def main():
         save_checkpoint(
             os.path.join(cfg.logging.checkpoint_dir, "last_model.pt"),
             model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
-            epoch=epoch + 1, best_metric=best_val_rmse, config=cfg.to_dict(),
-            seed=cfg.training.seed,
+            epoch=epoch + 1, best_metric=best_val_rmse, training_history=history,
+            config=cfg.to_dict(), seed=cfg.training.seed,
         )
 
         if val_rmse < best_val_rmse:
@@ -438,8 +474,8 @@ def main():
             save_checkpoint(
                 os.path.join(cfg.logging.checkpoint_dir, "best_model.pt"),
                 model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
-                epoch=epoch + 1, best_metric=best_val_rmse, config=cfg.to_dict(),
-                seed=cfg.training.seed,
+                epoch=epoch + 1, best_metric=best_val_rmse, training_history=history,
+                config=cfg.to_dict(), seed=cfg.training.seed,
             )
             print(f"  --> Saved new best checkpoint (Val RMSE: {val_rmse:.4f})")
 

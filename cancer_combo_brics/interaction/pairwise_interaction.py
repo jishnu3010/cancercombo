@@ -40,10 +40,22 @@ class ExplicitPairwiseFragmentInteraction(nn.Module):
             nn.LayerNorm(fragment_dim),
         )
 
+        # Trainable fusion projection for concatenated mean + max pooling (1024 -> 512)
+        self.fusion_projection = nn.Sequential(
+            nn.Linear(2 * fragment_dim, fragment_dim),
+            nn.LayerNorm(fragment_dim),
+        )
+
         self._init_weights()
 
     def _init_weights(self) -> None:
         for m in self.interaction_mlp:
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+        for m in self.fusion_projection:
             if isinstance(m, nn.Linear):
                 nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
                 if m.bias is not None:
@@ -56,7 +68,7 @@ class ExplicitPairwiseFragmentInteraction(nn.Module):
         mask_A: torch.Tensor,
         mask_B: torch.Tensor,
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
-        """Pairwise fragment interaction forward pass.
+        """Pairwise fragment interaction forward pass with dual masked mean + max pooling.
 
         Args:
             F_A: Drug A fragments tensor of shape (B, N_A, 512).
@@ -93,20 +105,41 @@ class ExplicitPairwiseFragmentInteraction(nn.Module):
         mask_A = mask_A.to(device)
         mask_B = mask_B.to(device)
         pair_mask = (mask_A.unsqueeze(2) * mask_B.unsqueeze(1)).unsqueeze(-1)
+        valid_pair_bool = (pair_mask > 0.5)
 
-        # Zero out padding pairs
-        pair_repr = pair_repr * pair_mask
+        valid_pair_counts = pair_mask.sum(dim=(1, 2))  # (B, 1)
+        valid_counts_clamped = torch.clamp(valid_pair_counts, min=1.0)
+        has_valid_pairs = (valid_pair_counts > 0.5)  # (B, 1)
 
-        # Permutation-invariant masked mean pooling -> r_AB in R^512
-        valid_pair_counts = torch.clamp(pair_mask.sum(dim=(1, 2)), min=1.0)  # (B, 1)
-        r_AB = pair_repr.sum(dim=(1, 2)) / valid_pair_counts  # (B, 512)
+        # 1. Masked Mean Pooling: (B, 512)
+        masked_pair_mean = pair_repr * pair_mask
+        mean_repr = masked_pair_mean.sum(dim=(1, 2)) / valid_counts_clamped
+        mean_repr = torch.where(has_valid_pairs, mean_repr, torch.zeros_like(mean_repr))
+
+        # 2. Masked Max Pooling: (B, 512)
+        # Fill invalid/padded pairs with a large negative number so they cannot affect max pooling
+        masked_pair_max = pair_repr.masked_fill(~valid_pair_bool, -1e9)
+        max_repr = masked_pair_max.amax(dim=(1, 2))
+        max_repr = torch.where(has_valid_pairs, max_repr, torch.zeros_like(max_repr))
+
+        # 3. Concatenate Mean (512-D) + Max (512-D) -> (B, 1024)
+        pooled_repr = torch.cat([mean_repr, max_repr], dim=-1)
+        assert pooled_repr.shape == (B, 2 * D), (
+            f"Expected pooled_repr shape ({B}, {2 * D}), got {pooled_repr.shape}"
+        )
+
+        # 4. Fusion Projection: 1024 -> 512-D
+        r_AB = self.fusion_projection(pooled_repr)
         assert r_AB.shape == (B, self.fragment_dim), (
             f"Expected r_AB shape ({B}, {self.fragment_dim}), got {r_AB.shape}"
         )
 
         diagnostics = {
+            "mean_pool_norm": torch.norm(mean_repr, dim=-1).mean().item(),
+            "max_pool_norm": torch.norm(max_repr, dim=-1).mean().item(),
+            "fused_r_AB_norm": torch.norm(r_AB, dim=-1).mean().item(),
             "norm_r_AB": torch.norm(r_AB, dim=-1).mean().item(),
-            "mean_valid_pairs": valid_pair_counts.mean().item(),
+            "mean_valid_pairs": valid_counts_clamped.mean().item(),
         }
 
         return r_AB, diagnostics
