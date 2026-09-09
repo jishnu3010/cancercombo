@@ -17,8 +17,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from cancer_combo_brics.config import ExperimentConfig
 from cancer_combo_brics.utils import load_checkpoint
-from cancer_combo_brics.data.dataset import CancerComboDataset, collate_combo_batch
-from cancer_combo_brics.data.preprocessing import CellExpressionPreprocessor
+from cancer_combo_brics.data.dataset import CancerComboDataset, ComboBatchCollator
+from cancer_combo_brics.data.preprocessing import CellExpressionPreprocessor, load_cell_expression_data
 from cancer_combo_brics.chemistry.cache import FunctionalGroupCache
 from cancer_combo_brics.model import CancerComboBRICS
 from cancer_combo_brics.losses import SurfaceRegressionLoss
@@ -79,18 +79,24 @@ def main():
     if not cell_file:
         raise FileNotFoundError(f"Cell expressions file not found. Tried paths: {[c for c in cell_candidates if c]}. Check dataset path.")
 
-    if cell_file.endswith(".npz"):
-        c_data = np.load(cell_file)
-        raw_c_matrix = c_data["expressions"]
-        c_names = list(c_data["cell_lines"])
-    else:
-        c_df = pd.read_csv(cell_file, index_col=0)
-        raw_c_matrix = c_df.values
-        c_names = list(c_df.index)
+    known_cells = test_df[cfg.data.cell_id_col].dropna().unique().tolist() if cfg.data.cell_id_col in test_df.columns else None
+    raw_c_matrix, c_names = load_cell_expression_data(cell_file, known_cell_names=known_cells)
 
-    preprocessor = CellExpressionPreprocessor.load(cfg.data.cell_preprocessor_file)
+    if os.path.exists(cfg.data.cell_preprocessor_file):
+        try:
+            preprocessor = CellExpressionPreprocessor.load(cfg.data.cell_preprocessor_file)
+            if preprocessor.expected_dim != raw_c_matrix.shape[1]:
+                print(f"[WARNING] Saved preprocessor expected_dim ({preprocessor.expected_dim}) != cell feature dim ({raw_c_matrix.shape[1]}). Re-fitting preprocessor.")
+                preprocessor = CellExpressionPreprocessor(expected_dim=raw_c_matrix.shape[1]).fit(raw_c_matrix)
+        except Exception as e:
+            print(f"[WARNING] Failed to load preprocessor ({e}). Re-fitting preprocessor.")
+            preprocessor = CellExpressionPreprocessor(expected_dim=raw_c_matrix.shape[1]).fit(raw_c_matrix)
+    else:
+        preprocessor = CellExpressionPreprocessor(expected_dim=raw_c_matrix.shape[1]).fit(raw_c_matrix)
+
     norm_c_matrix = preprocessor.transform(raw_c_matrix)
     cell_expr_dict = {name: norm_c_matrix[i] for i, name in enumerate(c_names)}
+
 
     fg_cache = FunctionalGroupCache(db_path=cfg.data.fg_cache_file, radius=cfg.data.fg_radius)
     test_dataset = CancerComboDataset(
@@ -104,8 +110,9 @@ def main():
         test_dataset,
         batch_size=cfg.training.batch_size,
         shuffle=False,
-        collate_fn=lambda b: collate_combo_batch(b, max_fragments=cfg.data.max_fragments),
+        collate_fn=ComboBatchCollator(max_fragments=cfg.data.max_fragments),
     )
+
 
     model.eval()
     records = []

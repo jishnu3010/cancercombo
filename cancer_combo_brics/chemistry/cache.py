@@ -29,6 +29,16 @@ class FunctionalGroupCache:
             os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
             self._init_db()
 
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        state["_lock"] = None
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        self._lock = threading.Lock()
+
+
     def _init_db(self) -> None:
         conn = None
         try:

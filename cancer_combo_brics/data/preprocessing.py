@@ -114,3 +114,49 @@ class CellExpressionPreprocessor:
         preprocessor.impute_values = data["impute_values"]
         preprocessor.is_fitted = True
         return preprocessor
+
+
+def load_cell_expression_data(
+    cell_file: str,
+    known_cell_names: Optional[List[str]] = None,
+) -> Tuple[np.ndarray, List[str]]:
+    """Load cell line expression matrix and cell line names from CSV or NPZ.
+
+    Automatically handles CSV orientation (whether cell lines are rows or columns).
+
+    Args:
+        cell_file: Path to .npz or .csv file.
+        known_cell_names: Optional list of cell line names from combination table.
+
+    Returns:
+        Tuple of (raw_c_matrix of shape (N_cells, N_genes), list of cell_line_names of length N_cells).
+    """
+    if cell_file.endswith(".npz"):
+        c_data = np.load(cell_file)
+        raw_c_matrix = c_data["expressions"].astype(np.float32)
+        c_names = list(c_data["cell_lines"])
+        return raw_c_matrix, [str(x) for x in c_names]
+
+    import pandas as pd
+
+    c_df = pd.read_csv(cell_file, index_col=0)
+
+    should_transpose = False
+    if c_df.index.name and "gene" in str(c_df.index.name).lower():
+        should_transpose = True
+    elif known_cell_names:
+        known_set = set(known_cell_names)
+        cols_match = len(known_set.intersection(set(c_df.columns)))
+        idx_match = len(known_set.intersection(set(c_df.index)))
+        if cols_match > idx_match:
+            should_transpose = True
+    elif c_df.shape[0] > c_df.shape[1] and c_df.shape[1] < 200:
+        should_transpose = True
+
+    if should_transpose:
+        c_df = c_df.T
+
+    raw_c_matrix = c_df.values.astype(np.float32)
+    c_names = [str(x) for x in c_df.index]
+    return raw_c_matrix, c_names
+

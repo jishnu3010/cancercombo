@@ -19,8 +19,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from cancer_combo_brics.config import ExperimentConfig
 from cancer_combo_brics.utils import set_seed, save_checkpoint, count_parameters, get_gpu_memory_mb
-from cancer_combo_brics.data.dataset import CancerComboDataset, collate_combo_batch
-from cancer_combo_brics.data.preprocessing import CellExpressionPreprocessor
+from cancer_combo_brics.data.dataset import CancerComboDataset, ComboBatchCollator
+from cancer_combo_brics.data.preprocessing import CellExpressionPreprocessor, load_cell_expression_data
 from cancer_combo_brics.chemistry.cache import FunctionalGroupCache
 from cancer_combo_brics.model import CancerComboBRICS
 from cancer_combo_brics.losses import SurfaceRegressionLoss
@@ -259,37 +259,56 @@ def main():
     if not cell_file:
         raise FileNotFoundError(f"Cell expressions file not found. Tried paths: {[c for c in cell_candidates if c]}. Check dataset path.")
 
-    if cell_file.endswith(".npz"):
-        c_data = np.load(cell_file)
-        raw_c_matrix = c_data["expressions"]
-        c_names = list(c_data["cell_lines"])
-    else:
-        c_df = pd.read_csv(cell_file, index_col=0)
-        raw_c_matrix = c_df.values
-        c_names = list(c_df.index)
+    known_cells = df[cfg.data.cell_id_col].dropna().unique().tolist() if cfg.data.cell_id_col in df.columns else None
+    raw_c_matrix, c_names = load_cell_expression_data(cell_file, known_cell_names=known_cells)
 
     preprocessor = None
     if os.path.exists(cfg.data.cell_preprocessor_file):
-        preprocessor = CellExpressionPreprocessor.load(cfg.data.cell_preprocessor_file)
-        print(f"Loaded cell preprocessor from: {cfg.data.cell_preprocessor_file}")
-    else:
+        try:
+            loaded_prep = CellExpressionPreprocessor.load(cfg.data.cell_preprocessor_file)
+            if loaded_prep.expected_dim == raw_c_matrix.shape[1]:
+                preprocessor = loaded_prep
+                print(f"Loaded cell preprocessor from: {cfg.data.cell_preprocessor_file}")
+            else:
+                print(
+                    f"[WARNING] Existing cell preprocessor expected_dim ({loaded_prep.expected_dim}) "
+                    f"does not match cell feature dim ({raw_c_matrix.shape[1]}). Re-fitting preprocessor."
+                )
+        except Exception as e:
+            print(f"[WARNING] Failed to load preprocessor ({e}). Re-fitting preprocessor.")
+
+    if preprocessor is None:
         preprocessor = CellExpressionPreprocessor(expected_dim=raw_c_matrix.shape[1])
         train_cells = df[df["split"] == "train"][cfg.data.cell_id_col].unique() if "split" in df.columns else c_names
         train_indices = [i for i, name in enumerate(c_names) if name in train_cells] or list(range(len(c_names)))
         preprocessor.fit(raw_c_matrix[train_indices])
         preprocessor.save(cfg.data.cell_preprocessor_file)
+        print(f"Fitted and saved cell preprocessor to: {cfg.data.cell_preprocessor_file}")
+
 
     norm_c_matrix = preprocessor.transform(raw_c_matrix)
     cell_expr_dict = {name: norm_c_matrix[i] for i, name in enumerate(c_names)}
 
     if "split" in df.columns:
-        train_df = df[df["split"] == "train"].reset_index(drop=True)
-        val_df = df[df["split"] == "val"].reset_index(drop=True)
-        test_df = df[df["split"] == "test"].reset_index(drop=True)
+        s_col = df["split"].astype(str)
+        if set(s_col.unique()).issubset({"1", "2", "3"}):
+            train_df = df[s_col == "1"].reset_index(drop=True)
+            val_df = df[s_col == "2"].reset_index(drop=True)
+            test_df = df[s_col == "3"].reset_index(drop=True)
+        else:
+            train_df = df[s_col.str.lower() == "train"].reset_index(drop=True)
+            val_df = df[s_col.str.lower() == "val"].reset_index(drop=True)
+            test_df = df[s_col.str.lower() == "test"].reset_index(drop=True)
+
+        if len(train_df) == 0:
+            train_df = df.sample(frac=0.7, random_state=cfg.training.seed).reset_index(drop=True)
+            val_df = df.drop(train_df.index).reset_index(drop=True)
+            test_df = val_df
     else:
         train_df = df.sample(frac=0.7, random_state=cfg.training.seed).reset_index(drop=True)
         val_df = df.drop(train_df.index).reset_index(drop=True)
         test_df = val_df
+
 
     print(f"Split sizes: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
 
@@ -310,11 +329,13 @@ def main():
         drug_id_col_a=cfg.data.drug_id_col_a, drug_id_col_b=cfg.data.drug_id_col_b,
     )
 
+    collator = ComboBatchCollator(max_fragments=cfg.data.max_fragments)
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=cfg.training.batch_size,
         shuffle=True,
-        collate_fn=lambda b: collate_combo_batch(b, max_fragments=cfg.data.max_fragments),
+        collate_fn=collator,
         num_workers=cfg.training.num_workers,
         pin_memory=cfg.training.pin_memory and (device.type == "cuda"),
     )
@@ -322,10 +343,11 @@ def main():
         val_dataset,
         batch_size=cfg.training.batch_size,
         shuffle=False,
-        collate_fn=lambda b: collate_combo_batch(b, max_fragments=cfg.data.max_fragments),
+        collate_fn=collator,
         num_workers=cfg.training.num_workers,
         pin_memory=cfg.training.pin_memory and (device.type == "cuda"),
     )
+
 
     model = CancerComboBRICS(config=cfg.model).to(device)
     param_counts = count_parameters(model)

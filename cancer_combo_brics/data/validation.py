@@ -10,6 +10,8 @@ import rdkit.Chem as Chem
 
 from cancer_combo_brics.data.splitting import check_drug_overlap, categorize_scenario
 from cancer_combo_brics.data.dataset import parse_dose_array, parse_viability_matrix
+from cancer_combo_brics.data.preprocessing import load_cell_expression_data
+
 
 
 def discover_data_files(root_dir: str = "./data") -> Dict[str, Optional[str]]:
@@ -153,14 +155,8 @@ def validate_dataset(
     cell_report = {}
     if cell_path and os.path.exists(cell_path):
         print(f"\nCell expression file: {cell_path}")
-        if cell_path.endswith(".npz"):
-            cell_data = np.load(cell_path)
-            expr_matrix = cell_data["expressions"]
-            cell_names = list(cell_data["cell_lines"])
-        else:
-            expr_df = pd.read_csv(cell_path, index_col=0)
-            cell_names = list(expr_df.index)
-            expr_matrix = expr_df.values
+        expr_matrix, cell_names = load_cell_expression_data(cell_path, known_cell_names=list(unique_cells))
+
 
         print(f"Cell expression matrix shape: {expr_matrix.shape}")
         feature_dim = expr_matrix.shape[1]

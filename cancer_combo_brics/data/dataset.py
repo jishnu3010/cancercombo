@@ -192,3 +192,14 @@ def collate_combo_batch(batch: List[Dict[str, Any]], max_fragments: int = 32) ->
         "cell_lines": cell_lines,
         "drug_pairs": drug_pairs,
     }
+
+
+class ComboBatchCollator:
+    """Picklable collator class for PyTorch DataLoader worker processes."""
+
+    def __init__(self, max_fragments: int = 32):
+        self.max_fragments = max_fragments
+
+    def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return collate_combo_batch(batch, max_fragments=self.max_fragments)
+

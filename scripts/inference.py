@@ -17,7 +17,7 @@ from cancer_combo_brics.config import ExperimentConfig
 from cancer_combo_brics.utils import load_checkpoint
 from cancer_combo_brics.chemistry.functional_group_fragments import extract_functional_group_fragments
 from cancer_combo_brics.chemistry.fragment_utils import pad_fragment_strings
-from cancer_combo_brics.data.preprocessing import CellExpressionPreprocessor
+from cancer_combo_brics.data.preprocessing import CellExpressionPreprocessor, load_cell_expression_data
 from cancer_combo_brics.model import CancerComboBRICS
 
 
@@ -52,28 +52,26 @@ def main():
 
     # 3. Load Cell Line Expression
     cell_file = args.cell_expr_path or cfg.data.cell_expression_file or "./data/cell_line_gene_expr.csv"
-    raw_expr = None
     if os.path.exists(cell_file):
-        if cell_file.endswith(".npz"):
-            c_data = np.load(cell_file)
-            c_names = list(c_data["cell_lines"])
-            c_matrix = c_data["expressions"]
-            idx = c_names.index(args.cell_id) if args.cell_id in c_names else 0
-            raw_expr = c_matrix[idx]
-        else:
-            import pandas as pd
-            c_df = pd.read_csv(cell_file, index_col=0)
-            idx = args.cell_id if args.cell_id in c_df.index else c_df.index[0]
-            raw_expr = c_df.loc[idx].values
+        raw_c_matrix, c_names = load_cell_expression_data(cell_file, known_cell_names=[args.cell_id] if args.cell_id else None)
+        idx = c_names.index(args.cell_id) if args.cell_id in c_names else 0
+        raw_expr = raw_c_matrix[idx]
     else:
-        raw_expr = np.random.randn(976).astype(np.float32)
+        raw_expr = np.random.randn(cfg.model.cell_dim).astype(np.float32)
 
     # Normalize cell expression
     if os.path.exists(cfg.data.cell_preprocessor_file):
-        prep = CellExpressionPreprocessor.load(cfg.data.cell_preprocessor_file)
-        norm_expr = prep.transform(raw_expr)
+        try:
+            prep = CellExpressionPreprocessor.load(cfg.data.cell_preprocessor_file)
+            if prep.expected_dim == len(raw_expr):
+                norm_expr = prep.transform(raw_expr)
+            else:
+                norm_expr = (raw_expr - np.mean(raw_expr)) / (np.std(raw_expr) + 1e-6)
+        except Exception:
+            norm_expr = (raw_expr - np.mean(raw_expr)) / (np.std(raw_expr) + 1e-6)
     else:
         norm_expr = (raw_expr - np.mean(raw_expr)) / (np.std(raw_expr) + 1e-6)
+
 
     # 4. Load Model
     model = CancerComboBRICS(config=cfg.model).to(device)
