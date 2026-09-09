@@ -97,6 +97,10 @@ class CancerComboDataset(Dataset):
         # Never divide by 100.0. Scale factor is strictly 1.0.
         self.scale_factor = 1.0
 
+        # Sanitize SMILES columns against missing / NaN values
+        self.df[self.smiles_col_a] = self.df[self.smiles_col_a].fillna("C").astype(str).str.strip()
+        self.df[self.smiles_col_b] = self.df[self.smiles_col_b].fillna("C").astype(str).str.strip()
+
         # Preload functional group extractions for unique SMILES
         all_smiles = list(self.df[self.smiles_col_a].unique()) + list(self.df[self.smiles_col_b].unique())
         self.fg_cache.preload_dataset_smiles(all_smiles)
@@ -108,11 +112,14 @@ class CancerComboDataset(Dataset):
         row = self.df.iloc[idx]
 
         # 1. SMILES & functional group fragment extraction
-        smiles_a = row[self.smiles_col_a]
-        smiles_b = row[self.smiles_col_b]
+        raw_a = row[self.smiles_col_a]
+        raw_b = row[self.smiles_col_b]
+        smiles_a = str(raw_a).strip() if pd.notna(raw_a) and str(raw_a).strip() and str(raw_a).strip().lower() != "nan" else "C"
+        smiles_b = str(raw_b).strip() if pd.notna(raw_b) and str(raw_b).strip() and str(raw_b).strip().lower() != "nan" else "C"
 
         frags_a = self.fg_cache.get_or_decompose(smiles_a)
         frags_b = self.fg_cache.get_or_decompose(smiles_b)
+
 
         # 2. Cell expression
         cell_id = str(row[self.cell_id_col])

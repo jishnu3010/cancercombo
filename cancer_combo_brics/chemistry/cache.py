@@ -62,8 +62,14 @@ class FunctionalGroupCache:
             raise RuntimeError("Database path is not set.")
         return sqlite3.connect(self.db_path, timeout=30.0)
 
+    def _clean_smiles(self, smiles: str) -> str:
+        if not smiles or not isinstance(smiles, str) or not smiles.strip() or str(smiles).strip().lower() == "nan":
+            return "C"
+        return smiles.strip()
+
     def get(self, smiles: str) -> Optional[List[str]]:
         """Retrieve fragments from memory or SQLite cache."""
+        smiles = self._clean_smiles(smiles)
         with self._lock:
             if smiles in self._mem_cache:
                 return self._mem_cache[smiles]
@@ -95,6 +101,7 @@ class FunctionalGroupCache:
 
     def set(self, smiles: str, fragments: List[str]) -> None:
         """Store fragments into memory and SQLite cache."""
+        smiles = self._clean_smiles(smiles)
         with self._lock:
             self._mem_cache[smiles] = fragments
 
@@ -120,6 +127,7 @@ class FunctionalGroupCache:
 
     def get_or_decompose(self, smiles: str) -> List[str]:
         """Fetch from cache or extract functional groups and cache."""
+        smiles = self._clean_smiles(smiles)
         cached = self.get(smiles)
         if cached is not None:
             return cached
@@ -127,6 +135,7 @@ class FunctionalGroupCache:
         frags = extract_functional_group_fragments(smiles, radius=self.radius)
         self.set(smiles, frags)
         return frags
+
 
     def get_many(self, smiles_list: List[str]) -> Dict[str, List[str]]:
         """Batch retrieve fragments."""

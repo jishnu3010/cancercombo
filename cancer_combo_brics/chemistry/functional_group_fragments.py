@@ -125,14 +125,16 @@ def extract_functional_group_fragments(
         Sorted, unique list of canonical fragment SMILES strings.
         If no functional group is detected or SMILES is invalid, returns [canonical_smiles].
     """
-    if not smiles or not isinstance(smiles, str) or not smiles.strip():
-        raise ValueError("Invalid SMILES: Input is empty or not a string.")
+    if not smiles or not isinstance(smiles, str) or not smiles.strip() or str(smiles).strip().lower() == "nan":
+        logger.warning(f"Invalid or empty SMILES '{smiles}', returning fallback ['C'].")
+        return ["C"]
 
     cleaned_input = smiles.strip()
     mol = Chem.MolFromSmiles(cleaned_input)
     if mol is None:
         logger.warning(f"RDKit failed to parse SMILES '{cleaned_input}', returning input.")
         return [cleaned_input]
+
 
     canonical_full = Chem.MolToSmiles(mol, isomericSmiles=True, canonical=True)
 
