@@ -124,27 +124,36 @@ def train_one_epoch(
 
             g_norms = compute_gradient_norms(model)
             global_norm = g_norms["global_grad_norm"]
-            grad_norms.append(global_norm)
 
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.training.gradient_clip)
 
             if use_amp:
+                scale_before = scaler.get_scale()
                 scaler.step(optimizer)
                 scaler.update()
+                scale_after = scaler.get_scale()
+                # If non-finite gradients were detected, scaler skipped optimizer step and reduced scale
+                step_executed = (scale_after >= scale_before)
             else:
                 optimizer.step()
+                step_executed = True
+
+            if step_executed and np.isfinite(global_norm):
+                grad_norms.append(global_norm)
 
             optimizer.zero_grad(set_to_none=True)
 
-            if scheduler is not None:
+            if scheduler is not None and step_executed:
                 scheduler.step()
 
         batch_loss = loss.item() * (config.training.gradient_accumulation_steps if config.training.gradient_accumulation_steps > 1 else 1.0)
         total_loss += batch_loss
-        pbar.set_postfix({"loss": f"{batch_loss:.4f}", "grad_norm": f"{global_norm:.2f}"})
+        gn_str = f"{global_norm:.2f}" if np.isfinite(global_norm) else "scale_adj"
+        pbar.set_postfix({"loss": f"{batch_loss:.4f}", "grad_norm": gn_str})
 
     mean_loss = total_loss / len(loader)
-    mean_grad_norm = float(np.mean(grad_norms)) if grad_norms else 0.0
+    finite_grad_norms = [g for g in grad_norms if np.isfinite(g)]
+    mean_grad_norm = float(np.mean(finite_grad_norms)) if finite_grad_norms else 0.0
     return {"train_loss": mean_loss, "train_grad_norm": mean_grad_norm}
 
 

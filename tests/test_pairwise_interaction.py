@@ -148,7 +148,7 @@ def test_gradient_flow():
     mask = torch.ones(2, 2)
 
     r_AB, _ = interaction(F_A, F_B, mask, mask)
-    loss = r_AB.sum()
+    loss = (r_AB ** 2).sum()
     loss.backward()
 
     # Check gradients in interaction MLP

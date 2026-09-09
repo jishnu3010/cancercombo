@@ -29,17 +29,19 @@ def compute_gradient_norms(model: nn.Module) -> Dict[str, float]:
             submod_norm_sq = 0.0
             for p in submod.parameters():
                 if p.grad is not None:
-                    param_norm = p.grad.detach().data.norm(2).item()
-                    submod_norm_sq += param_norm ** 2
-            norms[f"grad_norm_{mod_name}"] = np.sqrt(submod_norm_sq)
+                    param_norm = p.grad.detach().double().norm(2).item()
+                    if np.isfinite(param_norm):
+                        submod_norm_sq += param_norm ** 2
+            norms[f"grad_norm_{mod_name}"] = float(np.sqrt(submod_norm_sq))
 
     # Global norm
     for p in model.parameters():
         if p.grad is not None:
-            param_norm = p.grad.detach().data.norm(2).item()
-            total_norm_sq += param_norm ** 2
+            param_norm = p.grad.detach().double().norm(2).item()
+            if np.isfinite(param_norm):
+                total_norm_sq += param_norm ** 2
 
-    norms["global_grad_norm"] = np.sqrt(total_norm_sq)
+    norms["global_grad_norm"] = float(np.sqrt(total_norm_sq))
     return norms
 
 
