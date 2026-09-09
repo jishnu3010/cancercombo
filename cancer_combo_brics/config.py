@@ -37,6 +37,7 @@ class ModelConfig:
     cell_hidden_dim: int = 512
     fragment_dim: int = 512
     mol2vec_native_dim: int = 300
+    mol2vec_model_path: str = "data/model_300dim.pkl"
     interaction_hidden_dim: int = 512
     drug_cell_mlp_hidden: int = 512
     num_param_heads: int = 8

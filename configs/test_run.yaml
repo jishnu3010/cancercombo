@@ -24,6 +24,7 @@ model:
   cell_hidden_dim: 512
   fragment_dim: 512
   mol2vec_native_dim: 300
+  mol2vec_model_path: "./data/model_300dim.pkl"
   interaction_hidden_dim: 512
   drug_cell_mlp_hidden: 512
   num_param_heads: 8

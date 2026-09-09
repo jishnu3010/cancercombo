@@ -27,8 +27,8 @@ if BRICKS2_ROOT not in sys.path:
     sys.path.insert(0, BRICKS2_ROOT)
 
 # Add finalcheck project path to sys.path
-FINALCHECK_PATH = os.path.abspath(os.path.join(BRICKS2_ROOT, "..", "finalcheck", "finalcheck", "cancercombo"))
-if FINALCHECK_PATH not in sys.path:
+FINALCHECK_PATH = os.path.abspath(os.path.join(BRICKS2_ROOT, "..", "..", "finalcheck", "cancercombo"))
+if FINALCHECK_PATH not in sys.path and os.path.exists(FINALCHECK_PATH):
     sys.path.insert(0, FINALCHECK_PATH)
 
 from cancer_combo_brics.data.dataset import CancerComboDataset

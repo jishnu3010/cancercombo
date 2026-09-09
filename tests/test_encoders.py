@@ -16,12 +16,12 @@ def test_cell_encoder_dimensions():
 
 
 def test_fragment_encoder_mol2vec():
-    mol2vec = Mol2VecEncoder(native_dim=300, fragment_dim=512)
+    mol2vec = Mol2VecEncoder(model_path="data/model_300dim.pkl", native_dim=300, fragment_dim=512)
     frag_encoder = FragmentEncoder(mol2vec=mol2vec, fragment_dim=512)
 
     batch_frags = [
-        ["cNC(C)=O", "cO", "CCO", ""],
-        ["c1ccccc1", "cNC(C)=O", "", ""],
+        ["CC(=O)O", "c1ccccc1", "CCO", ""],
+        ["c1ccccc1", "CC(=O)O", "", ""],
     ]
     mask = torch.tensor([[1.0, 1.0, 1.0, 0.0], [1.0, 1.0, 0.0, 0.0]], dtype=torch.float32)
 

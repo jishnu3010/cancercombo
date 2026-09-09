@@ -1,91 +1,87 @@
-"""Morgan-environment-based learned fragment embedding module.
+"""Genuine Pretrained Mol2Vec fragment embedding module mapping chemical fragments to 512-D vectors.
 
-Encodes functional-group/context fragments by extracting Morgan environment identifiers
-(radius 0 and radius 1), embedding them into a native 300-D space via a learnable EmbeddingBag,
-and projecting the resulting vector to a trainable 512-D fragment representation.
+Flow:
+  1. Fragment SMILES -> RDKit Mol -> Mol2Vec Morgan radius-1 environment tokens
+  2. Token lookup in genuine pretrained Mol2Vec model (model_300dim.pkl)
+  3. Pretrained vector sum-pooling -> 300-D fragment vector
+  4. Trainable linear projection (300 -> 512) + LayerNorm + Dropout -> 512-D fragment embedding
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from typing import Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 import rdkit.Chem as Chem
-from rdkit.Chem import rdMolDescriptors
+from gensim.models import Word2Vec
+from mol2vec.features import mol2alt_sentence
 
 logger = logging.getLogger(__name__)
 
 
-def extract_morgan_subgraph_identifiers(
-    smiles: str,
-    radius: int = 1,
-    vocab_size: int = 50000,
-) -> List[int]:
-    """Extract Morgan fingerprint environment identifier indices for a fragment SMILES.
-
-    Args:
-        smiles: Input fragment SMILES string.
-        radius: Morgan fingerprint radius (0 and 1).
-        vocab_size: Hashing vocabulary size (default 50000).
-
-    Returns:
-        List of integer token indices corresponding to Morgan environment subgraphs.
-    """
-    if not smiles or not isinstance(smiles, str) or not smiles.strip():
-        return [0]
-
-    mol = Chem.MolFromSmiles(smiles.strip())
-    if mol is None:
-        # Fallback to string hash if invalid
-        val = abs(hash(smiles)) % (vocab_size - 1) + 1
-        return [val]
-
-    try:
-        fp = rdMolDescriptors.GetMorganFingerprint(mol, radius)
-        nonzero = fp.GetNonzeroElements()
-        token_indices: List[int] = []
-        for feat_id, count in nonzero.items():
-            idx = (feat_id % (vocab_size - 1)) + 1  # 1-indexed, reserving 0 for padding
-            token_indices.extend([idx] * count)
-
-        return token_indices if token_indices else [0]
-    except Exception as e:
-        logger.warning(f"Error extracting Morgan fingerprint for '{smiles}': {e}")
-        val = abs(hash(smiles)) % (vocab_size - 1) + 1
-        return [val]
-
-
 class Mol2VecEncoder(nn.Module):
-    """Morgan-environment-based learned fragment embedding module mapping chemical fragments to 512-D vectors.
+    """Genuine Pretrained Mol2Vec fragment embedding module.
 
-    Flow:
-      1. Fragment SMILES -> Morgan environment identifiers (radius 0/1)
-      2. Identifier lookup + sum pooling -> D-dimensional vector (native_dim D=300)
-      3. Linear projection (300 -> 512) + LayerNorm + Dropout -> 512-D fragment embedding
+    Uses pretrained 300-D Mol2Vec vectors (model_300dim.pkl) loaded into a frozen
+    nn.Embedding lookup table, followed by a trainable 300 -> 512 projection.
     """
 
     def __init__(
         self,
+        model_path: Optional[str] = None,
         native_dim: int = 300,
         fragment_dim: int = 512,
-        vocab_size: int = 50000,
         radius: int = 1,
         dropout: float = 0.1,
     ):
         super().__init__()
         self.native_dim = native_dim
         self.fragment_dim = fragment_dim
-        self.vocab_size = vocab_size
         self.radius = radius
 
-        # Learnable Morgan identifier embedding bag (sum-pooled per fragment)
-        self.embedding_bag = nn.EmbeddingBag(
-            num_embeddings=vocab_size,
-            embedding_dim=native_dim,
-            mode="sum",
+        if model_path is None:
+            # Check default path options
+            possible_paths = [
+                os.path.join("data", "model_300dim.pkl"),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "model_300dim.pkl")),
+            ]
+            for p in possible_paths:
+                if os.path.exists(p):
+                    model_path = p
+                    break
+
+        if model_path is None or not os.path.exists(model_path):
+            raise FileNotFoundError(
+                f"Genuine pretrained Mol2Vec model file not found at '{model_path}'. "
+                "BLOCKED — genuine pretrained Mol2Vec weights unavailable."
+            )
+
+        logger.info(f"Loading genuine pretrained Mol2Vec model from '{model_path}'...")
+        w2v_model = Word2Vec.load(model_path)
+        assert w2v_model.wv.vector_size == native_dim, (
+            f"Expected Mol2Vec vector dimension {native_dim}, got {w2v_model.wv.vector_size}"
+        )
+
+        # Build token-to-index mapping (index 0 reserved for padding / unknown)
+        self.token_to_idx: Dict[str, int] = {}
+        vocab_keys = list(w2v_model.wv.key_to_index.keys())
+        vocab_size = len(vocab_keys) + 1  # 1-indexed, 0 is padding/OOV
+
+        weights_matrix = torch.zeros((vocab_size, native_dim), dtype=torch.float32)
+
+        for i, token in enumerate(vocab_keys, start=1):
+            self.token_to_idx[str(token)] = i
+            weights_matrix[i] = torch.from_numpy(w2v_model.wv[token].copy())
+
+        # Frozen pretrained embedding layer (requires_grad = False)
+        self.embeddings = nn.Embedding.from_pretrained(
+            weights_matrix,
+            freeze=True,
             padding_idx=0,
         )
+        assert not self.embeddings.weight.requires_grad, "Mol2Vec pretrained embeddings must be frozen!"
 
         # Trainable projection from native_dim (300) to fragment_dim (512)
         self.projection = nn.Sequential(
@@ -94,16 +90,12 @@ class Mol2VecEncoder(nn.Module):
             nn.Dropout(dropout),
         )
 
-        # In-memory fragment embedding cache: smiles -> (512,) tensor
+        # In-memory fragment embedding cache namespace: smiles -> (512,) tensor
+        self.cache_namespace = "mol2vec_pretrained_v1"
         self._embedding_cache: Dict[str, torch.Tensor] = {}
-        self._init_weights()
+        self._init_projection_weights()
 
-    def _init_weights(self) -> None:
-        nn.init.normal_(self.embedding_bag.weight, mean=0.0, std=0.1)
-        # Ensure padding idx 0 is zeroed
-        with torch.no_grad():
-            self.embedding_bag.weight[0].fill_(0.0)
-
+    def _init_projection_weights(self) -> None:
         for m in self.projection:
             if isinstance(m, nn.Linear):
                 nn.init.kaiming_normal_(m.weight, mode="fan_in", nonlinearity="relu")
@@ -114,6 +106,23 @@ class Mol2VecEncoder(nn.Module):
         """Clear cached base fragment embeddings."""
         self._embedding_cache.clear()
 
+    def tokenize_fragment(self, smiles: str) -> List[int]:
+        """Convert fragment SMILES into Mol2Vec vocabulary token indices."""
+        if not smiles or not isinstance(smiles, str) or not smiles.strip():
+            return [0]
+
+        mol = Chem.MolFromSmiles(smiles.strip())
+        if mol is None:
+            return [0]
+
+        try:
+            tokens = mol2alt_sentence(mol, radius=self.radius)
+            indices = [self.token_to_idx.get(t, 0) for t in tokens]
+            return indices if indices else [0]
+        except Exception as e:
+            logger.warning(f"Error tokenizing SMILES '{smiles}': {e}")
+            return [0]
+
     def forward_single_fragments(
         self,
         frag_smiles_list: List[str],
@@ -123,23 +132,19 @@ class Mol2VecEncoder(nn.Module):
         if not frag_smiles_list:
             return torch.zeros((0, self.fragment_dim), device=device)
 
-        flat_indices: List[int] = []
-        offsets: List[int] = []
-        curr_offset = 0
+        native_vecs_list: List[torch.Tensor] = []
+        embed_device = self.embeddings.weight.device
 
         for s in frag_smiles_list:
-            ids = extract_morgan_subgraph_identifiers(
-                s, radius=self.radius, vocab_size=self.vocab_size
-            )
-            offsets.append(curr_offset)
-            flat_indices.extend(ids)
-            curr_offset += len(ids)
+            indices = self.tokenize_fragment(s)
+            idx_tensor = torch.tensor(indices, dtype=torch.long, device=embed_device)
+            # Lookup pretrained vectors: (num_tokens, 300)
+            vecs = self.embeddings(idx_tensor)
+            # Sum-pooling across fragment tokens -> (300,)
+            summed = vecs.sum(dim=0)
+            native_vecs_list.append(summed)
 
-        indices_t = torch.tensor(flat_indices, dtype=torch.long, device=device)
-        offsets_t = torch.tensor(offsets, dtype=torch.long, device=device)
-
-        # Sum-pooled native Mol2Vec embeddings: (K, native_dim=300)
-        native_vecs = self.embedding_bag(indices_t, offsets_t)
+        native_vecs = torch.stack(native_vecs_list, dim=0).to(device)
         assert native_vecs.shape == (len(frag_smiles_list), self.native_dim)
 
         # Trainable projection to 512-D
@@ -172,7 +177,6 @@ class Mol2VecEncoder(nn.Module):
         output = torch.zeros((B, N, self.fragment_dim), device=device)
         mask = mask.to(device)
 
-        # Disable cache if gradients are required through embedding_bag
         is_training = self.training or any(p.requires_grad for p in self.parameters())
         allow_cache = use_cache and not is_training
 
@@ -183,8 +187,9 @@ class Mol2VecEncoder(nn.Module):
             for j in range(N):
                 if mask[i, j] > 0.5:
                     frag_str = batched_fragments[i][j]
-                    if allow_cache and frag_str in self._embedding_cache:
-                        output[i, j] = self._embedding_cache[frag_str].to(device)
+                    cache_key = f"{self.cache_namespace}:{frag_str}"
+                    if allow_cache and cache_key in self._embedding_cache:
+                        output[i, j] = self._embedding_cache[cache_key].to(device)
                     else:
                         if frag_str not in frag_to_idx:
                             frag_to_idx[frag_str] = len(unique_to_encode)
@@ -194,7 +199,8 @@ class Mol2VecEncoder(nn.Module):
             encoded_unique = self.forward_single_fragments(unique_to_encode, device=device)
             if allow_cache:
                 for frag_str, idx in frag_to_idx.items():
-                    self._embedding_cache[frag_str] = encoded_unique[idx].detach().cpu()
+                    cache_key = f"{self.cache_namespace}:{frag_str}"
+                    self._embedding_cache[cache_key] = encoded_unique[idx].detach().cpu()
 
             for i in range(B):
                 for j in range(N):
@@ -209,3 +215,4 @@ class Mol2VecEncoder(nn.Module):
             f"Expected shape ({B}, {N}, {self.fragment_dim}), got {output.shape}"
         )
         return output
+

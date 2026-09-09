@@ -44,6 +44,7 @@ class CancerComboBRICS(nn.Module):
 
         # 2. Shared Fragment Encoder (Mol2Vec -> 512-D)
         self.fragment_encoder = FragmentEncoder(
+            model_path=getattr(self.config, "mol2vec_model_path", None),
             native_dim=getattr(self.config, "mol2vec_native_dim", 300),
             fragment_dim=self.config.fragment_dim,
             dropout=0.1,

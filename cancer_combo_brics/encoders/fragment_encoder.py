@@ -17,12 +17,14 @@ class FragmentEncoder(nn.Module):
     def __init__(
         self,
         mol2vec: Optional[Mol2VecEncoder] = None,
+        model_path: Optional[str] = None,
         native_dim: int = 300,
         fragment_dim: int = 512,
         dropout: float = 0.1,
     ):
         super().__init__()
         self.mol2vec = mol2vec if mol2vec is not None else Mol2VecEncoder(
+            model_path=model_path,
             native_dim=native_dim,
             fragment_dim=fragment_dim,
             dropout=dropout,

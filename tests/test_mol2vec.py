@@ -8,7 +8,7 @@ from cancer_combo_brics.encoders.fragment_encoder import FragmentEncoder
 def test_mol2vec_native_and_projected_dimensions():
     native_dim = 300
     fragment_dim = 512
-    encoder = Mol2VecEncoder(native_dim=native_dim, fragment_dim=fragment_dim)
+    encoder = Mol2VecEncoder(model_path="data/model_300dim.pkl", native_dim=native_dim, fragment_dim=fragment_dim)
 
     assert encoder.native_dim == 300
     assert encoder.fragment_dim == 512
@@ -23,7 +23,7 @@ def test_mol2vec_native_and_projected_dimensions():
 
 
 def test_encode_drug_fragments_batch_dimensions():
-    encoder = FragmentEncoder(native_dim=300, fragment_dim=512)
+    encoder = FragmentEncoder(model_path="data/model_300dim.pkl", native_dim=300, fragment_dim=512)
     device = torch.device("cpu")
 
     batched_fragments = [

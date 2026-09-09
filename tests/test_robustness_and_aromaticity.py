@@ -21,7 +21,7 @@ from cancer_combo_brics.chemistry.functional_group_fragments import (
     COMPILED_FG_PATTERNS,
 )
 from cancer_combo_brics.data.dataset import CancerComboDataset, collate_combo_batch, is_valid_smiles
-from cancer_combo_brics.encoders.mol2vec_encoder import Mol2VecEncoder, extract_morgan_subgraph_identifiers
+from cancer_combo_brics.encoders.mol2vec_encoder import Mol2VecEncoder
 from cancer_combo_brics.interaction.pairwise_interaction import ExplicitPairwiseFragmentInteraction
 from cancer_combo_brics.interaction.drug_cell import DrugCellInteraction
 from cancer_combo_brics.pharmacology.parameter_heads import PharmacologicalParameterHeads
