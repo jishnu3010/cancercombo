@@ -257,6 +257,7 @@ def main():
         const="checkpoints/last_model.pt",
         help="Path to checkpoint file to resume training from",
     )
+    parser.add_argument("--checkpoint_dir", type=str, default=None, help="Directory to save checkpoints")
     args = parser.parse_args()
 
     if args.resume is not None and not os.path.exists(args.resume):
@@ -267,6 +268,8 @@ def main():
         cfg.training.epochs = args.epochs
     if args.batch_size is not None:
         cfg.training.batch_size = args.batch_size
+    if args.checkpoint_dir is not None:
+        cfg.logging.checkpoint_dir = args.checkpoint_dir
 
     # Run data preflight unless explicitly skipped
     if not args.skip_preflight:
