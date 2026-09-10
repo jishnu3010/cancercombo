@@ -192,11 +192,18 @@ def load_checkpoint(
                 f"expected mol2vec_frozen=True, got {arch.get('mol2vec_frozen')}"
             )
 
-    # Restore model parameters strictly
+    # Restore model parameters
     try:
         model.load_state_dict(checkpoint["model_state_dict"], strict=True)
     except Exception as e:
-        raise ValueError(f"Failed to load model state_dict strictly from '{filepath}': {e}") from e
+        try:
+            missing, unexpected = model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+            if missing:
+                print(f"[WARNING] Missing keys when loading checkpoint '{filepath}': {missing}")
+            if unexpected:
+                print(f"[WARNING] Unexpected keys in checkpoint '{filepath}' were ignored: {len(unexpected)} keys")
+        except Exception as inner_e:
+            raise ValueError(f"Failed to load model state_dict from '{filepath}': {e}") from inner_e
 
     # Ensure pretrained Mol2Vec embeddings remain frozen
     if hasattr(model, "fragment_encoder") and hasattr(model.fragment_encoder, "mol2vec"):

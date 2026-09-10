@@ -61,7 +61,14 @@ def main():
 
     df = pd.read_csv(comb_file) if comb_file.endswith(".csv") else pd.read_parquet(comb_file)
 
-    test_df = df[df["split"] == "test"].reset_index(drop=True) if "split" in df.columns else df
+    if "split" in df.columns:
+        s_col = df["split"].astype(str)
+        if set(s_col.unique()).issubset({"1", "2", "3"}):
+            test_df = df[s_col == "3"].reset_index(drop=True)
+        else:
+            test_df = df[s_col.str.lower().isin(["test", "3"])].reset_index(drop=True)
+    else:
+        test_df = df
     print(f"Evaluating on {len(test_df)} test combination samples...")
 
     cell_candidates = [
