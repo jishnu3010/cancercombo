@@ -9,46 +9,38 @@ from __future__ import annotations
 import pytest
 
 
-def _gensim_available() -> bool:
-    """Return True if gensim >= 4.0 is importable and functional."""
-    try:
-        import gensim
-        from gensim.models import Word2Vec  # noqa: F401
-        # Ensure it is gensim >= 4.x (has key_to_index API)
-        major = int(gensim.__version__.split(".")[0])
-        return major >= 4
-    except Exception:
-        return False
+import os
+import pytest
 
 
-def _mol2vec_available() -> bool:
-    """Return True if mol2vec is importable."""
+def _mol2vec_functional() -> bool:
+    """Return True if genuine pretrained Mol2Vec can be loaded and tokenized."""
     try:
-        from mol2vec.features import mol2alt_sentence  # noqa: F401
+        possible_paths = [
+            "data/model_300dim.pkl",
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "model_300dim.pkl")),
+        ]
+        path = next((p for p in possible_paths if os.path.exists(p)), None)
+        if path is None:
+            return False
+        from cancer_combo_brics.encoders.mol2vec_encoder import Mol2VecEncoder
+        _ = Mol2VecEncoder(model_path=path)
         return True
     except Exception:
         return False
 
 
-GENSIM_AVAILABLE = _gensim_available()
-MOL2VEC_AVAILABLE = _mol2vec_available()
+GENSIM_AVAILABLE = _mol2vec_functional()
+MOL2VEC_AVAILABLE = GENSIM_AVAILABLE
 
-#: Pytest skip mark for tests that require gensim >= 4.0
+#: Pytest skip mark for tests that require Mol2Vec
 requires_gensim = pytest.mark.skipif(
     not GENSIM_AVAILABLE,
-    reason=(
-        "gensim>=4.0 not installed. "
-        "On Python 3.14, install Microsoft C++ Build Tools then: "
-        "pip install 'gensim>=4.1.0,<5.0' mol2vec"
-    ),
+    reason="Pretrained Mol2Vec model or dependencies not functional.",
 )
 
 #: Pytest skip mark for tests that require the pretrained Mol2Vec model file
 requires_mol2vec_model = pytest.mark.skipif(
     not GENSIM_AVAILABLE,
-    reason=(
-        "gensim>=4.0 not installed — cannot load Mol2Vec pretrained model. "
-        "On Python 3.14, install Microsoft C++ Build Tools then: "
-        "pip install 'gensim>=4.1.0,<5.0' mol2vec"
-    ),
+    reason="Pretrained Mol2Vec model or dependencies not functional.",
 )

@@ -217,6 +217,3 @@ class FunctionalGroupCache:
 
         return newly_cached
 
-
-# Alias for backward compatibility if referenced
-BRICSCache = FunctionalGroupCache

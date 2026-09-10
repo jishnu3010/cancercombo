@@ -14,13 +14,51 @@ import os
 from typing import Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
+import pickle
 import rdkit.Chem as Chem
-
-# NOTE: gensim and mol2vec are imported lazily inside Mol2VecEncoder.__init__
-# to allow the rest of the package to be importable even when gensim is not installed.
-# Tests that do not need Mol2Vec (checkpoint, pairwise, cell encoder, etc.) will still run.
+from rdkit.Chem import AllChem
 
 logger = logging.getLogger(__name__)
+
+
+class _Mol2VecPickleDummy:
+    """Helper dummy class allowing clean deserialization of Word2Vec pickle without gensim C-extensions."""
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __setstate__(self, state):
+        if isinstance(state, dict):
+            self.__dict__.update(state)
+        else:
+            self.state = state
+
+
+class _Mol2VecUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if "gensim" in module:
+            return _Mol2VecPickleDummy
+        return super().find_class(module, name)
+
+
+def _rdkit_mol2alt_sentence(mol: Chem.Mol, radius: int = 1) -> List[str]:
+    """Calculate Morgan fingerprint environment identifiers alternating sentence matching Mol2Vec specification."""
+    radii = list(range(int(radius) + 1))
+    info: Dict[Any, Any] = {}
+    AllChem.GetMorganFingerprint(mol, radius, bitInfo=info)
+
+    mol_atoms = [a.GetIdx() for a in mol.GetAtoms()]
+    dict_atoms = {x: {r: None for r in radii} for x in mol_atoms}
+
+    for element in info:
+        for atom_idx, radius_at in info[element]:
+            dict_atoms[atom_idx][radius_at] = element
+
+    identifiers_alt = []
+    for atom in dict_atoms:
+        for r in radii:
+            identifiers_alt.append(dict_atoms[atom][r])
+
+    return [str(x) for x in identifiers_alt if x is not None]
 
 
 class Mol2VecEncoder(nn.Module):
@@ -43,20 +81,12 @@ class Mol2VecEncoder(nn.Module):
         self.fragment_dim = fragment_dim
         self.radius = radius
 
-        # Lazy import of gensim/mol2vec — deferred to instantiation time so the
-        # rest of the package can be imported without gensim being installed.
+        # Try importing official mol2alt_sentence; fallback to exact RDKit implementation
         try:
-            from gensim.models import Word2Vec as _Word2Vec
             from mol2vec.features import mol2alt_sentence as _mol2alt_sentence
-        except ImportError as e:
-            raise ImportError(
-                f"Mol2VecEncoder requires gensim>=4.0 and mol2vec. "
-                f"On Python 3.14, install Microsoft C++ Build Tools first, then: "
-                f"pip install 'gensim>=4.1.0,<5.0' mol2vec\n"
-                f"Original error: {e}"
-            ) from e
-        # Cache mol2alt_sentence for use in tokenize_fragment
-        self._mol2alt_sentence = _mol2alt_sentence
+            self._mol2alt_sentence = _mol2alt_sentence
+        except Exception:
+            self._mol2alt_sentence = _rdkit_mol2alt_sentence
 
         if model_path is None:
             # Check default path options
@@ -76,21 +106,50 @@ class Mol2VecEncoder(nn.Module):
             )
 
         logger.info(f"Loading genuine pretrained Mol2Vec model from '{model_path}'...")
-        w2v_model = _Word2Vec.load(model_path)
-        assert w2v_model.wv.vector_size == native_dim, (
-            f"Expected Mol2Vec vector dimension {native_dim}, got {w2v_model.wv.vector_size}"
+        w2v_model = None
+        try:
+            from gensim.models import Word2Vec as _Word2Vec
+            w2v_model = _Word2Vec.load(model_path)
+        except Exception:
+            with open(model_path, "rb") as f:
+                w2v_model = _Mol2VecUnpickler(f).load()
+
+        wv = getattr(w2v_model, "wv", w2v_model)
+        vectors = getattr(wv, "vectors", getattr(wv, "syn0", None))
+        vector_size = getattr(wv, "vector_size", None) or getattr(w2v_model, "vector_size", None)
+        if vector_size is None and vectors is not None and hasattr(vectors, "shape"):
+            vector_size = vectors.shape[1]
+        elif vector_size is None:
+            vector_size = native_dim
+        assert vector_size == native_dim, (
+            f"Expected Mol2Vec vector dimension {native_dim}, got {vector_size}"
         )
 
         # Build token-to-index mapping (index 0 reserved for padding / unknown)
         self.token_to_idx: Dict[str, int] = {}
-        vocab_keys = list(w2v_model.wv.key_to_index.keys())
-        vocab_size = len(vocab_keys) + 1  # 1-indexed, 0 is padding/OOV
+        if hasattr(wv, "key_to_index"):
+            vocab_keys = list(wv.key_to_index.keys())
+        elif hasattr(wv, "index_to_key"):
+            vocab_keys = list(wv.index_to_key)
+        elif hasattr(wv, "index2word"):
+            vocab_keys = list(wv.index2word)
+        elif hasattr(wv, "vocab"):
+            vocab_keys = list(wv.vocab.keys())
+        else:
+            raise AttributeError("Unable to extract vocabulary keys from loaded Mol2Vec Word2Vec model.")
 
+        vocab_size = len(vocab_keys) + 1  # 1-indexed, 0 is padding/OOV
         weights_matrix = torch.zeros((vocab_size, native_dim), dtype=torch.float32)
 
-        for i, token in enumerate(vocab_keys, start=1):
-            self.token_to_idx[str(token)] = i
-            weights_matrix[i] = torch.from_numpy(w2v_model.wv[token].copy())
+        vectors = getattr(wv, "vectors", getattr(wv, "syn0", None))
+        if vectors is not None and hasattr(vectors, "__getitem__") and len(vectors) == len(vocab_keys):
+            weights_matrix[1:] = torch.from_numpy(vectors.copy())
+            for i, token in enumerate(vocab_keys, start=1):
+                self.token_to_idx[str(token)] = i
+        else:
+            for i, token in enumerate(vocab_keys, start=1):
+                self.token_to_idx[str(token)] = i
+                weights_matrix[i] = torch.from_numpy(wv[token].copy())
 
         # Frozen pretrained embedding layer (requires_grad = False)
         self.embeddings = nn.Embedding.from_pretrained(

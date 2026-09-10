@@ -134,6 +134,9 @@ def main():
             doses_B = batch["doses_B"].to(device)
             y_true = batch["viability_matrix"].to(device)
 
+            smiles_A = batch.get("smiles_A", None)
+            smiles_B = batch.get("smiles_B", None)
+
             y_pred, _ = model(
                 cell_expr=cell_expr,
                 fragments_A=frags_A,
@@ -142,15 +145,20 @@ def main():
                 mask_B=mask_B,
                 doses_A=doses_A,
                 doses_B=doses_B,
+                smiles_A=smiles_A,
+                smiles_B=smiles_B,
             )
 
             y_true_np = y_true.cpu().numpy()
             y_pred_np = y_pred.cpu().numpy()
             scenarios_np = batch["scenarios"].numpy()
+            is_valid_np = batch["is_valid_sample"].cpu().numpy() if "is_valid_sample" in batch else np.ones(len(batch["cell_lines"]), dtype=bool)
             cells = batch["cell_lines"]
             pairs = batch["drug_pairs"]
 
             for i in range(len(cells)):
+                if not is_valid_np[i]:
+                    continue
                 records.append({
                     "y_true": y_true_np[i],
                     "y_pred": y_pred_np[i],
@@ -160,9 +168,16 @@ def main():
                 })
 
     metrics = evaluate_predictions_grouped(records)
+    total_eval = len(test_df)
+    valid_eval = len(records)
+    excluded_eval = total_eval - valid_eval
+    cov_pct = (valid_eval / total_eval * 100.0) if total_eval > 0 else 0.0
 
     print("\n================ EVALUATION METRICS REPORT ================")
-    print(f"Total Test Samples: {metrics.get('total_samples', 0)}")
+    print(f"Total Rows:     {total_eval}")
+    print(f"Valid Rows:     {valid_eval}")
+    print(f"Excluded Rows:  {excluded_eval}")
+    print(f"Coverage:       {cov_pct:.2f}%")
     overall = metrics.get("overall", {})
     print(f"Overall RMSE:       {overall.get('rmse', 0.0):.4f}")
     print(f"Overall MAE:        {overall.get('mae', 0.0):.4f}")

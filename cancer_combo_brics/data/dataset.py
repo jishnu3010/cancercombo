@@ -165,6 +165,8 @@ class CancerComboDataset(Dataset):
 
         return {
             "cell_expr": cell_expr.astype(np.float32),
+            "smiles_a": smiles_a,
+            "smiles_b": smiles_b,
             "frags_a": frags_a,
             "frags_b": frags_b,
             "doses_a": doses_a,
@@ -192,6 +194,9 @@ def collate_combo_batch(batch: List[Dict[str, Any]], max_fragments: int = 32) ->
     padded_a, mask_a = pad_fragment_strings(frags_a_raw, max_fragments=max_fragments)
     padded_b, mask_b = pad_fragment_strings(frags_b_raw, max_fragments=max_fragments)
 
+    smiles_a = [b.get("smiles_a", "") for b in batch]
+    smiles_b = [b.get("smiles_b", "") for b in batch]
+
     # 3. Doses
     doses_a = torch.from_numpy(np.stack([b["doses_a"] for b in batch], axis=0))
     doses_b = torch.from_numpy(np.stack([b["doses_b"] for b in batch], axis=0))
@@ -207,6 +212,8 @@ def collate_combo_batch(batch: List[Dict[str, Any]], max_fragments: int = 32) ->
 
     return {
         "cell_expr": cell_exprs,
+        "smiles_A": smiles_a,
+        "smiles_B": smiles_b,
         "fragments_A": padded_a,
         "mask_A": mask_a,
         "fragments_B": padded_b,

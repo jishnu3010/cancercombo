@@ -28,9 +28,16 @@ if BRICKS2_ROOT not in sys.path:
     sys.path.insert(0, BRICKS2_ROOT)
 
 # Add finalcheck project path to sys.path
-FINALCHECK_PATH = os.path.abspath(os.path.join(BRICKS2_ROOT, "..", "..", "finalcheck", "cancercombo"))
-if FINALCHECK_PATH not in sys.path and os.path.exists(FINALCHECK_PATH):
-    sys.path.insert(0, FINALCHECK_PATH)
+candidate_paths = [
+    os.path.abspath(os.path.join(BRICKS2_ROOT, "..", "finalcheck", "finalcheck", "cancercombo")),
+    os.path.abspath(os.path.join(BRICKS2_ROOT, "..", "finalcheck", "cancercombo")),
+    os.path.abspath(os.path.join(BRICKS2_ROOT, "..", "..", "finalcheck", "cancercombo")),
+    r"c:\Users\DELL\Downloads\finalcheck\finalcheck\cancercombo",
+]
+for p in candidate_paths:
+    if os.path.exists(p) and p not in sys.path:
+        sys.path.insert(0, p)
+        break
 
 from cancer_combo_brics.data.dataset import CancerComboDataset
 from cancer_combo_brics.pharmacology.parameter_heads import (

@@ -1,0 +1,286 @@
+{
+  "dataset_summary": {
+    "total_samples": 118695,
+    "train_samples": 95151,
+    "val_samples": 11397,
+    "test_samples": 12147,
+    "train_drugs": 61,
+    "val_drugs": 19,
+    "test_drugs": 21,
+    "train_test_drug_overlap": 0,
+    "coverage_percent": 100.0
+  },
+  "gradient_statistics": [
+    {
+      "module": "cell_encoder",
+      "weight_norm": 11.3162,
+      "grad_norm": 31.131,
+      "grad_param_ratio": 2.751012,
+      "nan_inf_count": 0
+    },
+    {
+      "module": "fragment_encoder",
+      "weight_norm": 13.6382,
+      "grad_norm": 217.8799,
+      "grad_param_ratio": 15.975739,
+      "nan_inf_count": 0
+    },
+    {
+      "module": "pairwise_interaction",
+      "weight_norm": 13.667,
+      "grad_norm": 57.6616,
+      "grad_param_ratio": 4.219039,
+      "nan_inf_count": 0
+    },
+    {
+      "module": "whole_drug_encoder",
+      "weight_norm": 13.6695,
+      "grad_norm": 9.9738,
+      "grad_param_ratio": 0.729643,
+      "nan_inf_count": 0
+    },
+    {
+      "module": "drug_fusion",
+      "weight_norm": 13.6595,
+      "grad_norm": 29.2415,
+      "grad_param_ratio": 2.140738,
+      "nan_inf_count": 0
+    },
+    {
+      "module": "drug_cell",
+      "weight_norm": 11.3144,
+      "grad_norm": 5.4022,
+      "grad_param_ratio": 0.477459,
+      "nan_inf_count": 0
+    },
+    {
+      "module": "parameter_heads",
+      "weight_norm": 12.2813,
+      "grad_norm": 2.6031,
+      "grad_param_ratio": 0.211958,
+      "nan_inf_count": 0
+    },
+    {
+      "module": "dose_bias",
+      "weight_norm": 12.3651,
+      "grad_norm": 20.9592,
+      "grad_param_ratio": 1.695033,
+      "nan_inf_count": 0
+    }
+  ],
+  "prediction_distribution": {
+    "y_true": {
+      "min": 0.44999998807907104,
+      "max": 144.7100067138672,
+      "mean": 82.66255187988281,
+      "std": 29.184606552124023
+    },
+    "y_pred": {
+      "min": 52.78813171386719,
+      "max": 274.1874694824219,
+      "mean": 79.53800201416016,
+      "std": 22.680782318115234
+    },
+    "baseline_constant_mean_rmse": 29.184606552124023,
+    "model_rmse": 36.74958038330078,
+    "collapsed_to_constant": false,
+    "predictions_blown_up": false
+  },
+  "hill_parameter_diagnostics": {
+    "e1": {
+      "min": 0.2666568160057068,
+      "max": 0.8579442501068115,
+      "mean": 0.5713806058466434,
+      "std": 0.11415174611864969
+    },
+    "e2": {
+      "min": 0.24810779094696045,
+      "max": 0.7694567441940308,
+      "mean": 0.5020390556752682,
+      "std": 0.10119499422563673
+    },
+    "e3": {
+      "min": 0.053657565265893936,
+      "max": 0.5446622967720032,
+      "mean": 0.22357915641739964,
+      "std": 0.0877356090045992
+    },
+    "logc1": {
+      "min": -2.215848922729492,
+      "max": 0.8517138957977295,
+      "mean": -0.690786847807467,
+      "std": 0.716386534241873
+    },
+    "logc2": {
+      "min": -1.6543610095977783,
+      "max": 0.9056854248046875,
+      "mean": -0.3906900041550398,
+      "std": 0.4816628897197199
+    },
+    "h1": {
+      "min": 0.0,
+      "max": 0.7461712956428528,
+      "mean": 0.02105515643954277,
+      "std": 0.08851859422749811
+    },
+    "h2": {
+      "min": 0.0,
+      "max": 0.9313982129096985,
+      "mean": 0.03258461363613605,
+      "std": 0.14559567077876548
+    },
+    "alpha": {
+      "min": 0.0,
+      "max": 0.23040293157100677,
+      "mean": 0.00336406372487545,
+      "std": 0.024387146369524996
+    }
+  },
+  "surface_diagnostics": [
+    {
+      "sample_index": 0,
+      "surface_mean": 72.49714660644531,
+      "surface_std": 8.724860191345215,
+      "surface_min": 67.28205108642578,
+      "surface_max": 100.0,
+      "row_variance": 18.140060424804688,
+      "col_variance": 67.39151000976562,
+      "max_abs_error": 57.297119140625,
+      "is_flat": false,
+      "shows_dose_response": true,
+      "surface_4x4": [
+        [
+          100.0,
+          80.77762603759766,
+          80.81646728515625,
+          81.1504135131836
+        ],
+        [
+          70.14545440673828,
+          67.28205108642578,
+          67.32089233398438,
+          67.65483856201172
+        ],
+        [
+          70.14545440673828,
+          67.28205108642578,
+          67.32089233398438,
+          67.65483856201172
+        ],
+        [
+          70.14545440673828,
+          67.28205108642578,
+          67.32089233398438,
+          67.65483856201172
+        ]
+      ]
+    },
+    {
+      "sample_index": 1,
+      "surface_mean": 76.66749572753906,
+      "surface_std": 7.662597179412842,
+      "surface_min": 72.26236724853516,
+      "surface_max": 100.0,
+      "row_variance": 54.47002029418945,
+      "col_variance": 11.008286476135254,
+      "max_abs_error": 61.6813850402832,
+      "is_flat": false,
+      "shows_dose_response": true,
+      "surface_4x4": [
+        [
+          100.0,
+          73.5533218383789,
+          73.57940673828125,
+          73.81233978271484
+        ],
+        [
+          84.83940124511719,
+          72.26236724853516,
+          72.2884521484375,
+          72.5213851928711
+        ],
+        [
+          84.83940124511719,
+          72.26236724853516,
+          72.2884521484375,
+          72.5213851928711
+        ],
+        [
+          84.83940124511719,
+          72.26236724853516,
+          72.2884521484375,
+          72.5213851928711
+        ]
+      ]
+    },
+    {
+      "sample_index": 2,
+      "surface_mean": 70.6623306274414,
+      "surface_std": 9.246109008789062,
+      "surface_min": 61.806976318359375,
+      "surface_max": 100.0,
+      "row_variance": 37.27102279663086,
+      "col_variance": 62.98844909667969,
+      "max_abs_error": 61.98059844970703,
+      "is_flat": false,
+      "shows_dose_response": true,
+      "surface_4x4": [
+        [
+          100.0,
+          74.71007537841797,
+          74.74317932128906,
+          74.7044906616211
+        ],
+        [
+          80.5678482055664,
+          69.4861831665039,
+          69.519287109375,
+          69.48059844970703
+        ],
+        [
+          71.05268096923828,
+          65.6489028930664,
+          65.6820068359375,
+          65.64331817626953
+        ],
+        [
+          63.893497467041016,
+          61.812557220458984,
+          61.84566879272461,
+          61.806976318359375
+        ]
+      ]
+    }
+  ],
+  "ablations": {
+    "full_model_rmse": 36.66508865356445,
+    "zero_cell_drug_only_rmse": 34.054954528808594,
+    "zero_drug_cell_only_rmse": 36.661373138427734,
+    "delta_rmse_cell_ablation": -2.6101341247558594,
+    "delta_rmse_drug_ablation": -0.00371551513671875
+  },
+  "sensitivity_tests": {
+    "mean_abs_delta_cell_plus_10pct": 6.9141387939453125e-06,
+    "mean_abs_delta_shuffle_drug_A": 0.0,
+    "mean_abs_delta_shuffle_drug_B": 0.0,
+    "model_ignores_drugs": true
+  },
+  "baseline_comparison_table": [
+    {
+      "model_type": "Constant Mean Baseline",
+      "rmse": 35.4157
+    },
+    {
+      "model_type": "Zero-Drug (Cell Only)",
+      "rmse": 36.6614
+    },
+    {
+      "model_type": "Zero-Cell (Drug Only)",
+      "rmse": 34.055
+    },
+    {
+      "model_type": "CancerCombo Full Active Model",
+      "rmse": 36.6651
+    }
+  ]
+}

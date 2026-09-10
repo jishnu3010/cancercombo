@@ -105,6 +105,9 @@ def train_one_epoch(
         doses_B = batch["doses_B"].to(device, non_blocking=True)
         y_true = batch["viability_matrix"].to(device, non_blocking=True)
 
+        smiles_A = batch.get("smiles_A", None)
+        smiles_B = batch.get("smiles_B", None)
+
         use_amp = config.training.mixed_precision and device.type == "cuda"
 
         with torch.amp.autocast(device_type="cuda", enabled=use_amp):
@@ -116,6 +119,8 @@ def train_one_epoch(
                 mask_B=mask_B,
                 doses_A=doses_A,
                 doses_B=doses_B,
+                smiles_A=smiles_A,
+                smiles_B=smiles_B,
             )
             loss = criterion(y_pred, y_true)
             if config.training.gradient_accumulation_steps > 1:
@@ -190,6 +195,9 @@ def evaluate_model(
         doses_B = batch["doses_B"].to(device, non_blocking=True)
         y_true = batch["viability_matrix"].to(device, non_blocking=True)
 
+        smiles_A = batch.get("smiles_A", None)
+        smiles_B = batch.get("smiles_B", None)
+
         y_pred, diag = model(
             cell_expr=cell_expr,
             fragments_A=frags_A,
@@ -198,6 +206,8 @@ def evaluate_model(
             mask_B=mask_B,
             doses_A=doses_A,
             doses_B=doses_B,
+            smiles_A=smiles_A,
+            smiles_B=smiles_B,
             return_diagnostics=True,
         )
         loss = criterion(y_pred, y_true)
@@ -362,27 +372,21 @@ def main():
             test_df = df[s_col.str.lower() == "test"].reset_index(drop=True)
 
         if len(train_df) == 0:
-            # Fallback: genuine 3-way split using original indices (avoids index-reset leakage)
-            train_samples = df.sample(frac=0.7, random_state=cfg.training.seed)
-            train_indices = train_samples.index
-            remaining = df.drop(train_indices)
-            val_samples = remaining.sample(frac=0.5, random_state=cfg.training.seed)
-            val_indices = val_samples.index
-            test_samples = remaining.drop(val_indices)
-            train_df = train_samples.reset_index(drop=True)
-            val_df = val_samples.reset_index(drop=True)
-            test_df = test_samples.reset_index(drop=True)
+            n = len(df)
+            perm = np.random.RandomState(cfg.training.seed).permutation(n)
+            n_train = int(0.7 * n)
+            n_val = int(0.15 * n)
+            train_df = df.iloc[perm[:n_train]].reset_index(drop=True)
+            val_df = df.iloc[perm[n_train:n_train + n_val]].reset_index(drop=True)
+            test_df = df.iloc[perm[n_train + n_val:]].reset_index(drop=True)
     else:
-        # Fallback: genuine 3-way split using original indices (avoids index-reset leakage)
-        train_samples = df.sample(frac=0.7, random_state=cfg.training.seed)
-        train_indices = train_samples.index
-        remaining = df.drop(train_indices)
-        val_samples = remaining.sample(frac=0.5, random_state=cfg.training.seed)
-        val_indices = val_samples.index
-        test_samples = remaining.drop(val_indices)
-        train_df = train_samples.reset_index(drop=True)
-        val_df = val_samples.reset_index(drop=True)
-        test_df = test_samples.reset_index(drop=True)
+        n = len(df)
+        perm = np.random.RandomState(cfg.training.seed).permutation(n)
+        n_train = int(0.7 * n)
+        n_val = int(0.15 * n)
+        train_df = df.iloc[perm[:n_train]].reset_index(drop=True)
+        val_df = df.iloc[perm[n_train:n_train + n_val]].reset_index(drop=True)
+        test_df = df.iloc[perm[n_train + n_val:]].reset_index(drop=True)
 
     print(f"Split sizes: Train={len(train_df)}, Val={len(val_df)}, Test={len(test_df)}")
 
@@ -443,7 +447,13 @@ def main():
 
     start_epoch = 0
     best_val_rmse = float("inf")
+    best_epoch = 0
+    patience_counter = 0
     history: List[Dict[str, Any]] = []
+
+    early_stopping_enabled = getattr(cfg.training, "early_stopping", True)
+    early_stopping_patience = getattr(cfg.training, "early_stopping_patience", 10)
+    early_stopping_min_delta = getattr(cfg.training, "early_stopping_min_delta", 0.0)
 
     if args.resume:
         print(f"\n==================================================")
@@ -457,14 +467,18 @@ def main():
             scaler=scaler,
             map_location=str(device),
         )
-        completed_epoch = checkpoint.get("epoch", 0)
+        completed_epoch = checkpoint.get("last_completed_epoch", checkpoint.get("epoch", 0))
         start_epoch = completed_epoch
-        best_val_rmse = checkpoint.get("best_metric", float("inf"))
+        best_val_rmse = checkpoint.get("best_val_rmse", checkpoint.get("best_metric", float("inf")))
         history = checkpoint.get("training_history", [])
+        es_state = checkpoint.get("early_stopping_state", {}) or {}
+        patience_counter = es_state.get("patience_counter", 0)
+        best_epoch = es_state.get("best_epoch", completed_epoch if completed_epoch > 0 else 0)
         lr = optimizer.param_groups[0]["lr"] if (optimizer and optimizer.param_groups) else cfg.optimizer.lr_new
         print(f"Completed epoch: {completed_epoch}")
         print(f"Starting epoch: {start_epoch + 1}")
-        print(f"Best validation RMSE: {best_val_rmse:.4f}")
+        print(f"Best validation RMSE so far: {best_val_rmse:.4f} (Epoch {best_epoch})")
+        print(f"Early stopping patience: {patience_counter}/{early_stopping_patience}")
         print(f"Learning rate: {lr}")
         print(f"==================================================\n")
     else:
@@ -521,17 +535,29 @@ def main():
             f"Time: {epoch_time:.1f}s"
         )
 
-        # Determine is_best FIRST, then update best_val_rmse, then save both checkpoints
-        # This ensures last_model.pt always contains the TRUE current best metric.
-        is_best = val_rmse < best_val_rmse
+        # Real validation-based early stopping logic (monitoring val_rmse, min mode)
+        is_best = val_rmse < (best_val_rmse - early_stopping_min_delta)
         if is_best:
             best_val_rmse = val_rmse
+            best_epoch = epoch + 1
+            patience_counter = 0
+        else:
+            patience_counter += 1
 
+        es_state = {
+            "patience_counter": patience_counter,
+            "best_epoch": best_epoch,
+            "best_val_rmse": best_val_rmse,
+            "early_stopping_patience": early_stopping_patience,
+        }
+
+        # Save last checkpoint (always holds the latest completed epoch and true best metric)
         save_checkpoint(
             os.path.join(cfg.logging.checkpoint_dir, "last_model.pt"),
             model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
             epoch=epoch + 1, best_metric=best_val_rmse, training_history=history,
             config=cfg.to_dict(), seed=cfg.training.seed,
+            early_stopping_state=es_state,
         )
 
         if is_best:
@@ -540,8 +566,16 @@ def main():
                 model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
                 epoch=epoch + 1, best_metric=best_val_rmse, training_history=history,
                 config=cfg.to_dict(), seed=cfg.training.seed,
+                early_stopping_state=es_state,
             )
             print(f"  --> Saved new best checkpoint (Val RMSE: {val_rmse:.4f})")
+        else:
+            if early_stopping_enabled:
+                print(f"  --> Early stopping patience: {patience_counter}/{early_stopping_patience} (Best was Epoch {best_epoch} with Val RMSE: {best_val_rmse:.4f})")
+
+        if early_stopping_enabled and patience_counter >= early_stopping_patience:
+            print(f"\n[Early Stopping] Triggered at epoch {epoch + 1}! Best validation epoch was {best_epoch} with Val RMSE: {best_val_rmse:.4f}.")
+            break
 
     log_df = pd.DataFrame(history)
     log_df.to_csv(os.path.join(cfg.logging.log_dir, "training_log.csv"), index=False)

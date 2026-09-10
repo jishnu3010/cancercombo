@@ -20,12 +20,12 @@ from cancer_combo_brics.pharmacology.dose_bias import DoseDependentBias
 class CancerComboBRICS(nn.Module):
     """CancerCombo neural model for complete 2D dose-response surface prediction.
 
-    Target Architecture Flow:
+    Target Architecture Flow (bricks2 Final Architecture):
       1. Cell-line expression (976-D) -> CellEncoder -> c (512-D)
       2. Drug A, B functional-group fragments -> Mol2Vec + Projection -> F_A (N x 512), F_B (M x 512)
       3. Explicit Pairwise Fragment Interaction -> r_AB (512-D)
       4. Drug-Cell Interaction: z_DC (2048-D) -> Sigmoid Gate -> r_gate (512-D) -> r_DC (1536-D)
-      5. 8 Pharmacological parameter heads
+      5. 8 Pharmacological parameter heads (1536 -> 1024 -> 512 -> 256 -> 1)
       6. Constraint transformation (e0 = 100.0)
       7. Vectorized Bivariate Hill Solver -> Y_hill (B x 4 x 4)
       8. Dose-dependent bias -> Bias (B x 4 x 4)
@@ -44,8 +44,8 @@ class CancerComboBRICS(nn.Module):
 
         # 2. Shared Fragment Encoder (Mol2Vec -> 512-D)
         self.fragment_encoder = FragmentEncoder(
-            model_path=getattr(self.config, "mol2vec_model_path", None),
-            native_dim=getattr(self.config, "mol2vec_native_dim", 300),
+            model_path=self.config.mol2vec_model_path,
+            native_dim=self.config.mol2vec_native_dim,
             fragment_dim=self.config.fragment_dim,
             dropout=0.1,
         )
@@ -53,8 +53,9 @@ class CancerComboBRICS(nn.Module):
         # 3. Explicit Pairwise Fragment Interaction (512-D -> r_AB in R^512)
         self.pairwise_interaction = ExplicitPairwiseFragmentInteraction(
             fragment_dim=self.config.fragment_dim,
-            hidden_dim=getattr(self.config, "interaction_hidden_dim", 512),
+            hidden_dim=self.config.interaction_hidden_dim,
             dropout=0.1,
+            pooling_mode=self.config.pooling_mode,
         )
 
         # 4. Explicit Drug-Cell Interaction (512 + 512 -> r_DC in R^1536)
@@ -66,24 +67,24 @@ class CancerComboBRICS(nn.Module):
         # 5. 8 Pharmacological Parameter Heads (matching finalcheck DeepSynBa)
         self.parameter_heads = PharmacologicalParameterHeads(
             in_dim=3 * self.config.fragment_dim,  # 1536
-            emb_size=getattr(self.config, "emb_size", 1024),
+            emb_size=self.config.emb_size,
             dropout=self.config.param_dropout,
         )
 
         # 6. Constraint Transform (matching finalcheck e0=100.0)
         self.constraint_transform = ConstraintTransform(
-            e0=getattr(self.config, "hill_e0", 100.0),
+            e0=self.config.hill_e0,
         )
 
         # 7. Bivariate Hill Solver (matching finalcheck SynBa Log-Sum-Exp e0=100.0)
         self.hill_solver = BivariateHillSolver(
-            e0=getattr(self.config, "hill_e0", 100.0),
+            e0=self.config.hill_e0,
         )
 
         # 8. Dose-Dependent Bias (matching finalcheck dual predictors)
         self.dose_bias = DoseDependentBias(
             context_dim=3 * self.config.fragment_dim,  # 1536
-            emb_size=getattr(self.config, "emb_size", 1024),
+            emb_size=self.config.emb_size,
             dropout=self.config.param_dropout,
             enabled=self.config.enable_bias,
         )
@@ -98,6 +99,7 @@ class CancerComboBRICS(nn.Module):
         doses_A: torch.Tensor,
         doses_B: torch.Tensor,
         return_diagnostics: bool = False,
+        **kwargs,
     ) -> Tuple[torch.Tensor, Optional[Dict[str, Any]]]:
         """Full forward pass of target CancerCombo architecture.
 

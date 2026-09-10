@@ -27,11 +27,10 @@ class DrugCellInteraction(nn.Module):
         self.mlp_hidden = mlp_hidden
 
         # MLP for gating: 2048 -> mlp_hidden -> 512
+        # Architecture: Linear -> ReLU -> Linear -> Sigmoid
         self.gate_mlp = nn.Sequential(
             nn.Linear(4 * dim, mlp_hidden),
-            nn.LayerNorm(mlp_hidden),
-            nn.GELU(),
-            nn.Dropout(dropout),
+            nn.ReLU(),
             nn.Linear(mlp_hidden, dim),
             nn.Sigmoid(),
         )

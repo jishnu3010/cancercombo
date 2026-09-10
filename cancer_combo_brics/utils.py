@@ -27,23 +27,25 @@ def count_parameters(model: nn.Module) -> Dict[str, int]:
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    molformer_params = 0
-    if hasattr(model, "molformer"):
-        molformer_params = sum(p.numel() for p in model.molformer.parameters())
-
-    new_params = total_params - molformer_params
-    new_trainable = sum(
-        p.numel() for name, p in model.named_parameters()
-        if "molformer" not in name and p.requires_grad
-    )
-
-    return {
+    counts: Dict[str, int] = {
         "total_params": total_params,
         "trainable_params": trainable_params,
-        "molformer_params": molformer_params,
-        "new_params": new_params,
-        "new_trainable_params": new_trainable,
     }
+
+    if hasattr(model, "cell_encoder"):
+        counts["cell_encoder"] = sum(p.numel() for p in model.cell_encoder.parameters() if p.requires_grad)
+    if hasattr(model, "fragment_encoder"):
+        counts["fragment_encoder"] = sum(p.numel() for p in model.fragment_encoder.parameters() if p.requires_grad)
+    if hasattr(model, "pairwise_interaction"):
+        counts["pairwise_interaction"] = sum(p.numel() for p in model.pairwise_interaction.parameters() if p.requires_grad)
+    if hasattr(model, "drug_cell"):
+        counts["drug_cell"] = sum(p.numel() for p in model.drug_cell.parameters() if p.requires_grad)
+    if hasattr(model, "parameter_heads"):
+        counts["parameter_heads"] = sum(p.numel() for p in model.parameter_heads.parameters() if p.requires_grad)
+    if hasattr(model, "dose_bias"):
+        counts["dose_bias"] = sum(p.numel() for p in model.dose_bias.parameters() if p.requires_grad)
+
+    return counts
 
 
 def save_rng_state() -> Dict[str, Any]:
@@ -102,8 +104,9 @@ def save_checkpoint(
     cell_preprocessor_stats: Optional[Dict[str, Any]] = None,
     seed: int = 42,
     arch_metadata: Optional[Dict[str, Any]] = None,
+    early_stopping_state: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Atomically save training checkpoint with full model, optimizer, scheduler, scaler, RNG, and history state."""
+    """Atomically save training checkpoint with full model, optimizer, scheduler, scaler, RNG, early stopping, and history state."""
     abs_filepath = os.path.abspath(filepath)
     os.makedirs(os.path.dirname(abs_filepath), exist_ok=True)
 
@@ -119,7 +122,9 @@ def save_checkpoint(
 
     checkpoint = {
         "epoch": epoch,
+        "last_completed_epoch": epoch,
         "best_metric": best_metric,
+        "best_val_rmse": best_metric,
         "seed": seed,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict() if optimizer is not None else None,
@@ -130,6 +135,7 @@ def save_checkpoint(
         "training_history": training_history if training_history is not None else [],
         "rng_state": save_rng_state(),
         "arch_metadata": default_arch,
+        "early_stopping_state": early_stopping_state,
     }
 
     tmp_filepath = abs_filepath + ".tmp"
@@ -176,10 +182,10 @@ def load_checkpoint(
                 f"Architecture mismatch in checkpoint '{filepath}': "
                 f"expected r_AB={expected_r_AB}, r_DC={expected_r_DC}, got r_AB={arch.get('r_AB_dim')}, r_DC={arch.get('r_DC_dim')}"
             )
-        if arch.get("pooling_mode") != "mean_max":
+        if arch.get("pooling_mode") not in ("mean_max", "mean"):
             raise ValueError(
                 f"Architecture mismatch in checkpoint '{filepath}': "
-                f"expected pooling_mode='mean_max', got '{arch.get('pooling_mode')}'"
+                f"expected pooling_mode in ('mean_max', 'mean'), got '{arch.get('pooling_mode')}'"
             )
         if arch.get("mol2vec") != "pretrained_300dim":
             raise ValueError(

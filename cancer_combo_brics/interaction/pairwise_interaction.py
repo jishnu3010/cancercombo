@@ -25,10 +25,12 @@ class ExplicitPairwiseFragmentInteraction(nn.Module):
         fragment_dim: int = 512,
         hidden_dim: int = 512,
         dropout: float = 0.1,
+        pooling_mode: str = "mean_max",
     ):
         super().__init__()
         self.fragment_dim = fragment_dim
         self.hidden_dim = hidden_dim
+        self.pooling_mode = pooling_mode.lower()
 
         # Pairwise interaction network (2048 -> 512 -> 512)
         self.interaction_mlp = nn.Sequential(
@@ -41,9 +43,12 @@ class ExplicitPairwiseFragmentInteraction(nn.Module):
         )
 
         # Trainable fusion projection for concatenated mean + max pooling (1024 -> 512)
+        # Architecture: Linear -> LayerNorm -> ReLU -> Dropout -> 512
         self.fusion_projection = nn.Sequential(
             nn.Linear(2 * fragment_dim, fragment_dim),
             nn.LayerNorm(fragment_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
         )
 
         self._init_weights()
@@ -116,30 +121,39 @@ class ExplicitPairwiseFragmentInteraction(nn.Module):
         mean_repr = masked_pair_mean.sum(dim=(1, 2)) / valid_counts_clamped
         mean_repr = torch.where(has_valid_pairs, mean_repr, torch.zeros_like(mean_repr))
 
-        # 2. Masked Max Pooling: (B, 512)
-        # Fill invalid/padded pairs with a large negative number so they cannot affect max pooling
-        masked_pair_max = pair_repr.masked_fill(~valid_pair_bool, -1e9)
-        max_repr = masked_pair_max.amax(dim=(1, 2))
-        max_repr = torch.where(has_valid_pairs, max_repr, torch.zeros_like(max_repr))
+        if self.pooling_mode == "mean":
+            r_AB = mean_repr
+            diagnostics = {
+                "mean_pool_norm": torch.norm(mean_repr, dim=-1).mean().item(),
+                "fused_r_AB_norm": torch.norm(r_AB, dim=-1).mean().item(),
+                "norm_r_AB": torch.norm(r_AB, dim=-1).mean().item(),
+                "mean_valid_pairs": valid_counts_clamped.mean().item(),
+            }
+        else:
+            # 2. Masked Max Pooling: (B, 512)
+            # Fill invalid/padded pairs with a large negative number so they cannot affect max pooling
+            masked_pair_max = pair_repr.masked_fill(~valid_pair_bool, -1e9)
+            max_repr = masked_pair_max.amax(dim=(1, 2))
+            max_repr = torch.where(has_valid_pairs, max_repr, torch.zeros_like(max_repr))
 
-        # 3. Concatenate Mean (512-D) + Max (512-D) -> (B, 1024)
-        pooled_repr = torch.cat([mean_repr, max_repr], dim=-1)
-        assert pooled_repr.shape == (B, 2 * D), (
-            f"Expected pooled_repr shape ({B}, {2 * D}), got {pooled_repr.shape}"
-        )
+            # 3. Concatenate Mean (512-D) + Max (512-D) -> (B, 1024)
+            pooled_repr = torch.cat([mean_repr, max_repr], dim=-1)
+            assert pooled_repr.shape == (B, 2 * D), (
+                f"Expected pooled_repr shape ({B}, {2 * D}), got {pooled_repr.shape}"
+            )
 
-        # 4. Fusion Projection: 1024 -> 512-D
-        r_AB = self.fusion_projection(pooled_repr)
-        assert r_AB.shape == (B, self.fragment_dim), (
-            f"Expected r_AB shape ({B}, {self.fragment_dim}), got {r_AB.shape}"
-        )
+            # 4. Fusion Projection: 1024 -> 512-D
+            r_AB = self.fusion_projection(pooled_repr)
+            assert r_AB.shape == (B, self.fragment_dim), (
+                f"Expected r_AB shape ({B}, {self.fragment_dim}), got {r_AB.shape}"
+            )
 
-        diagnostics = {
-            "mean_pool_norm": torch.norm(mean_repr, dim=-1).mean().item(),
-            "max_pool_norm": torch.norm(max_repr, dim=-1).mean().item(),
-            "fused_r_AB_norm": torch.norm(r_AB, dim=-1).mean().item(),
-            "norm_r_AB": torch.norm(r_AB, dim=-1).mean().item(),
-            "mean_valid_pairs": valid_counts_clamped.mean().item(),
-        }
+            diagnostics = {
+                "mean_pool_norm": torch.norm(mean_repr, dim=-1).mean().item(),
+                "max_pool_norm": torch.norm(max_repr, dim=-1).mean().item(),
+                "fused_r_AB_norm": torch.norm(r_AB, dim=-1).mean().item(),
+                "norm_r_AB": torch.norm(r_AB, dim=-1).mean().item(),
+                "mean_valid_pairs": valid_counts_clamped.mean().item(),
+            }
 
         return r_AB, diagnostics

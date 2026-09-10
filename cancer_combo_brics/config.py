@@ -48,6 +48,8 @@ class ModelConfig:
     hill_e0: float = 100.0  # Fixed baseline: 100.0 corresponds to 100% viability
     # Dose-dependent bias
     enable_bias: bool = True
+    # Pairwise pooling mode: "mean_max" or "mean"
+    pooling_mode: str = "mean_max"
 
 
 @dataclass
@@ -65,6 +67,12 @@ class TrainingConfig:
     rank_lambda: float = 1.0  # Ranking loss coefficient matching finalcheck
     aux_lambda: float = 0.05  # Parameter supervision auxiliary coefficient matching finalcheck
     num_ranking_pairs: int = 256
+    # Early stopping parameters
+    early_stopping: bool = True
+    early_stopping_patience: int = 10
+    early_stopping_min_delta: float = 0.0
+    early_stopping_metric: str = "val_rmse"
+    early_stopping_mode: str = "min"
 
 
 @dataclass

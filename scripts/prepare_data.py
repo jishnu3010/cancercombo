@@ -17,7 +17,7 @@ from cancer_combo_brics.config import ExperimentConfig
 from cancer_combo_brics.data.validation import discover_data_files, validate_dataset
 from cancer_combo_brics.data.splitting import create_drug_disjoint_splits, validate_existing_splits
 from cancer_combo_brics.data.preprocessing import CellExpressionPreprocessor
-from cancer_combo_brics.chemistry.cache import BRICSCache
+from cancer_combo_brics.chemistry.cache import FunctionalGroupCache
 
 
 def generate_synthetic_data(data_dir: str = "./data", num_samples: int = 100) -> Tuple[str, str]:
@@ -188,12 +188,12 @@ def main():
         preprocessor.save(cfg.data.cell_preprocessor_file)
         print(f"Saved train cell preprocessor to {cfg.data.cell_preprocessor_file}")
 
-    # Pre-populate BRICS cache
-    print("\nPre-computing BRICS decompositions for unique SMILES...")
-    cache = BRICSCache(db_path=cfg.data.brics_cache_file)
+    # Pre-populate functional-group fragment cache
+    print("\nPre-computing functional-group fragmentations for unique SMILES...")
+    cache = FunctionalGroupCache(db_path=cfg.data.fg_cache_file)
     all_smi = list(df[cfg.data.smiles_col_a].dropna().unique()) + list(df[cfg.data.smiles_col_b].dropna().unique())
     newly_cached = cache.preload_dataset_smiles(all_smi)
-    print(f"BRICS Cache populated at {cfg.data.brics_cache_file} ({newly_cached} newly decomposed molecules).")
+    print(f"FG Cache populated at {cfg.data.fg_cache_file} ({newly_cached} newly decomposed molecules).")
 
     print("\n[SUCCESS] Data preparation completed.")
 
